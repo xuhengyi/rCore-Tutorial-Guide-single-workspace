@@ -175,7 +175,6 @@
 <li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">第三章：多道程序与分时多任务</a><input checked="" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
 <li class="toctree-l2"><a class="reference internal" href="0intro.html">引言</a></li>
 <li class="toctree-l2"><a class="reference internal" href="1multi-loader.html">多道程序放置与加载</a></li>
-<li class="toctree-l2"><a class="reference internal" href="2task-switching.html">任务切换</a></li>
 <li class="toctree-l2"><a class="reference internal" href="3multiprogramming.html">管理多道程序</a></li>
 <li class="toctree-l2"><a class="reference internal" href="4time-sharing-system.html">分时多任务系统</a></li>
 <li class="toctree-l2 current current-page"><a class="current reference internal" href="#">chapter3练习</a></li>
@@ -267,7 +266,7 @@
 <h2>编程作业<a class="headerlink" href="#id1" title="永久链接至标题">¶</a></h2>
 <div class="section" id="id2">
 <h3>获取任务信息<a class="headerlink" href="#id2" title="永久链接至标题">¶</a></h3>
-<p>在 ch3 中，我们的系统已经能够支持多个任务分时轮流运行，我们希望引入一个新的系统调用 <a href="#id3"><span class="problematic" id="id4">``</span></a>sys_trace``（ID 为 410）用来追踪当前任务系统调用的历史信息，并做对应的修改。定义如下。</p>
+<p>在 ch3 中，我们的系统已经能够支持多个任务分时轮流运行，我们希望引入一个新的系统调用 <code class="docutils literal notranslate"><span class="pre">sys_trace</span></code> （ID 为 410）用来追踪当前任务系统调用的历史信息，并做对应的修改。定义如下。</p>
 <div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="k">fn</span> <span class="nf">sys_trace</span><span class="p">(</span><span class="n">_trace_request</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">_id</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">_data</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span>
 </pre></div>
 </div>
@@ -303,8 +302,8 @@
 </ul>
 </div>
 </div>
-<div class="section" id="id5">
-<h3>实验要求<a class="headerlink" href="#id5" title="永久链接至标题">¶</a></h3>
+<div class="section" id="id3">
+<h3>实验要求<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h3>
 <ul class="simple">
 <li><p>完成分支: ch3。</p></li>
 <li><p>实验目录要求</p></li>
@@ -344,8 +343,8 @@ virtio-drivers <span class="o">=</span> <span class="o">{</span> <span class="nv
 </div>
 </div>
 </div>
-<div class="section" id="id6">
-<h2>简答作业<a class="headerlink" href="#id6" title="永久链接至标题">¶</a></h2>
+<div class="section" id="id4">
+<h2>简答作业<a class="headerlink" href="#id4" title="永久链接至标题">¶</a></h2>
 <ol class="arabic">
 <li><p>正确进入 U 态后，程序的特征还应有：使用 S 态特权指令，访问 S 态寄存器后会报错。
 请同学们可以自行测试这些内容（运行 <a class="reference external" href="https://github.com/LearningOS/rCore-Tutorial-Test/tree/master/src/bin">三个 bad 测例 (ch2b_bad_*.rs)</a> ），
@@ -391,8 +390,8 @@ virtio-drivers <span class="o">=</span> <span class="o">{</span> <span class="nv
 </li>
 </ol>
 </div>
-<div class="section" id="id7">
-<h2>报告要求<a class="headerlink" href="#id7" title="永久链接至标题">¶</a></h2>
+<div class="section" id="id5">
+<h2>报告要求<a class="headerlink" href="#id5" title="永久链接至标题">¶</a></h2>
 <ul class="simple">
 <li><p>简单总结你实现的功能（200字以内，不要贴代码）。</p></li>
 <li><p>完成问答题。</p></li>
@@ -460,11 +459,11 @@ virtio-drivers <span class="o">=</span> <span class="o">{</span> <span class="nv
 <li><a class="reference internal" href="#">chapter3练习</a><ul>
 <li><a class="reference internal" href="#id1">编程作业</a><ul>
 <li><a class="reference internal" href="#id2">获取任务信息</a></li>
-<li><a class="reference internal" href="#id5">实验要求</a></li>
+<li><a class="reference internal" href="#id3">实验要求</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#id6">简答作业</a></li>
-<li><a class="reference internal" href="#id7">报告要求</a></li>
+<li><a class="reference internal" href="#id4">简答作业</a></li>
+<li><a class="reference internal" href="#id5">报告要求</a></li>
 </ul>
 </li>
 </ul>

@@ -2,7 +2,7 @@
 <html class="no-js" lang="zh_CN">
   <head><meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1"/>
-    <meta name="color-scheme" content="light dark"><link rel="index" title="索引" href="../genindex.html" /><link rel="search" title="搜索" href="../search.html" /><link rel="next" title="分时多任务系统" href="4time-sharing-system.html" /><link rel="prev" title="任务切换" href="2task-switching.html" />
+    <meta name="color-scheme" content="light dark"><link rel="index" title="索引" href="../genindex.html" /><link rel="search" title="搜索" href="../search.html" /><link rel="next" title="分时多任务系统" href="4time-sharing-system.html" /><link rel="prev" title="多道程序放置与加载" href="1multi-loader.html" />
 
     <meta name="generator" content="sphinx-4.1.2, furo 2021.08.31"/>
         <title>管理多道程序 - rCore-Tutorial-Guide 文档</title>
@@ -175,7 +175,6 @@
 <li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">第三章：多道程序与分时多任务</a><input checked="" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle child pages in navigation</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
 <li class="toctree-l2"><a class="reference internal" href="0intro.html">引言</a></li>
 <li class="toctree-l2"><a class="reference internal" href="1multi-loader.html">多道程序放置与加载</a></li>
-<li class="toctree-l2"><a class="reference internal" href="2task-switching.html">任务切换</a></li>
 <li class="toctree-l2 current current-page"><a class="current reference internal" href="#">管理多道程序</a></li>
 <li class="toctree-l2"><a class="reference internal" href="4time-sharing-system.html">分时多任务系统</a></li>
 <li class="toctree-l2"><a class="reference internal" href="5exercise.html">chapter3练习</a></li>
@@ -267,267 +266,229 @@
 <ul class="simple">
 <li><p>任务运行状态：未初始化、准备执行、正在执行、已退出</p></li>
 <li><p>任务控制块：维护任务状态和任务上下文</p></li>
-<li><p>任务相关系统调用：程序主动暂停 <code class="docutils literal notranslate"><span class="pre">sys_yield</span></code> 和主动退出 <code class="docutils literal notranslate"><span class="pre">sys_exit</span></code></p></li>
+<li><p>任务相关系统调用：程序主动暂停 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code> 和主动退出 <code class="docutils literal notranslate"><span class="pre">sys_exit</span></code></p></li>
 </ul>
 <div class="section" id="yield">
 <h2>yield 系统调用<a class="headerlink" href="#yield" title="永久链接至标题">¶</a></h2>
 <img alt="../_images/multiprogramming.png" src="../_images/multiprogramming.png"/>
 <p>上图描述了一种多道程序执行的典型情况。其中横轴为时间线，纵轴为正在执行的实体。
 开始时，蓝色应用向外设提交了一个请求，外设随即开始工作，
-但是它要一段时间后才能返回结果。蓝色应用于是调用 <code class="docutils literal notranslate"><span class="pre">sys_yield</span></code> 交出 CPU 使用权，
+但是它要一段时间后才能返回结果。蓝色应用于是调用 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code> 交出 CPU 使用权，
 内核让绿色应用继续执行。一段时间后 CPU 切换回蓝色应用，发现外设仍未返回结果，
-于是再次 <code class="docutils literal notranslate"><span class="pre">sys_yield</span></code> 。直到第二次切换回蓝色应用，外设才处理完请求，于是蓝色应用终于可以向下执行了。</p>
-<p>我们还会遇到很多其他需要等待其完成才能继续向下执行的事件，调用 <code class="docutils literal notranslate"><span class="pre">sys_yield</span></code> 可以避免等待过程造成的资源浪费。</p>
+于是再次 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code> 。直到第二次切换回蓝色应用，外设才处理完请求，于是蓝色应用终于可以向下执行了。</p>
+<p>我们还会遇到很多其他需要等待其完成才能继续向下执行的事件，调用 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code> 可以避免等待过程造成的资源浪费。</p>
 <div class="literal-block-wrapper docutils container" id="id5">
 <div class="code-block-caption"><span class="caption-text">第三章新增系统调用（一）</span><a class="headerlink" href="#id5" title="永久链接至代码">¶</a></div>
 <div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="sd">/// 功能：应用主动交出 CPU 所有权并切换到其他应用。</span>
 <span class="sd">/// 返回值：总是返回 0。</span>
 <span class="sd">/// syscall ID：124</span>
-<span class="k">fn</span> <span class="nf">sys_yield</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">isize</span><span class="p">;</span><span class="w"></span>
+<span class="k">fn</span> <span class="nf">sys_sched_yield</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">isize</span><span class="p">;</span><span class="w"></span>
 </pre></div>
 </div>
 </div>
 <p>用户库对应的实现和封装：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// user/src/syscall.rs</span>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// tg-syscall/src/user.rs</span>
 
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">sys_yield</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">syscall</span><span class="p">(</span><span class="n">SYSCALL_YIELD</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">])</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">sched_yield</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// SAFETY: 无参数系统调用</span>
+<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">syscall0</span><span class="p">(</span><span class="n">SyscallId</span>::<span class="n">SCHED_YIELD</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
-
-<span class="c1">// user/src/lib.rs</span>
-<span class="c1">// yield 是 Rust 的关键字</span>
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">yield_</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"> </span><span class="n">sys_yield</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>下文介绍内核应如何实现该系统调用。</p>
 </div>
 <div class="section" id="id2">
 <h2>任务控制块与任务运行状态<a class="headerlink" href="#id2" title="永久链接至标题">¶</a></h2>
-<p>任务运行状态暂包括如下几种：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos">1</span><span class="c1">// os/src/task/task.rs</span>
-<span class="linenos">2</span>
-<span class="linenos">3</span><span class="cp">#[derive(Copy, Clone, PartialEq)]</span><span class="w"></span>
-<span class="linenos">4</span><span class="k">pub</span><span class="w"> </span><span class="k">enum</span> <span class="nc">TaskStatus</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">5</span><span class="w">    </span><span class="n">UnInit</span><span class="p">,</span><span class="w"> </span><span class="c1">// 未初始化</span>
-<span class="linenos">6</span><span class="w">    </span><span class="n">Ready</span><span class="p">,</span><span class="w"> </span><span class="c1">// 准备运行</span>
-<span class="linenos">7</span><span class="w">    </span><span class="n">Running</span><span class="p">,</span><span class="w"> </span><span class="c1">// 正在运行</span>
-<span class="linenos">8</span><span class="w">    </span><span class="n">Exited</span><span class="p">,</span><span class="w"> </span><span class="c1">// 已退出</span>
-<span class="linenos">9</span><span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>任务状态外和任务上下文一并保存在名为 <strong>任务控制块</strong> (Task Control Block) 的数据结构中：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos">1</span><span class="c1">// os/src/task/task.rs</span>
-<span class="linenos">2</span>
-<span class="linenos">3</span><span class="cp">#[derive(Copy, Clone)]</span><span class="w"></span>
-<span class="linenos">4</span><span class="k">pub</span><span class="w"> </span><span class="k">struct</span> <span class="nc">TaskControlBlock</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">5</span><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">task_status</span>: <span class="nc">TaskStatus</span><span class="p">,</span><span class="w"></span>
-<span class="linenos">6</span><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">task_cx</span>: <span class="nc">TaskContext</span><span class="p">,</span><span class="w"></span>
-<span class="linenos">7</span><span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>任务控制块非常重要。在内核中，它就是应用的管理单位。后面的章节我们还会不断向里面添加更多内容。</p>
-</div>
-<div class="section" id="id3">
-<h2>任务管理器<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h2>
-<p>内核需要一个全局的任务管理器来管理这些任务控制块：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/task/mod.rs</span>
+<p>由于第三章需要同时运行多个程序，我们不能再像第二章那样，把程序内的信息全堆在 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 中了。于是，本章节新增了一个 <code class="docutils literal notranslate"><span class="pre">task.rs</span></code> 来统一管理每个程序各自的信息。这样的数据结构名为 <strong>任务控制块</strong> (Task Control Block) 。</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/task.rs</span>
 
-<span class="k">pub</span><span class="w"> </span><span class="k">struct</span> <span class="nc">TaskManager</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">num_app</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"></span>
-<span class="w">    </span><span class="n">inner</span>: <span class="nc">UPSafeCell</span><span class="o">&lt;</span><span class="n">TaskManagerInner</span><span class="o">&gt;</span><span class="p">,</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-
-<span class="k">struct</span> <span class="nc">TaskManagerInner</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">tasks</span>: <span class="p">[</span><span class="n">TaskControlBlock</span><span class="p">;</span><span class="w"> </span><span class="n">MAX_APP_NUM</span><span class="p">],</span><span class="w"></span>
-<span class="w">    </span><span class="n">current_task</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span> <span class="nc">TaskControlBlock</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">ctx</span>: <span class="nc">LocalContext</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">finish</span>: <span class="kt">bool</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">stack</span>: <span class="p">[</span><span class="kt">usize</span><span class="p">;</span><span class="w"> </span><span class="mi">256</span><span class="p">],</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>这里用到了变量与常量分离的编程风格：字段 <code class="docutils literal notranslate"><span class="pre">num_app</span></code> 表示应用数目，它在 <code class="docutils literal notranslate"><span class="pre">TaskManager</span></code> 初始化后将保持不变；
-而包裹在 <code class="docutils literal notranslate"><span class="pre">TaskManagerInner</span></code> 内的任务控制块数组 <code class="docutils literal notranslate"><span class="pre">tasks</span></code>，以及正在执行的应用编号 <code class="docutils literal notranslate"><span class="pre">current_task</span></code> 会在执行过程中变化。</p>
-<p>初始化 <code class="docutils literal notranslate"><span class="pre">TaskManager</span></code> 的全局实例 <code class="docutils literal notranslate"><span class="pre">TASK_MANAGER</span></code>：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// os/src/task/mod.rs</span>
-<span class="linenos"> 2</span>
-<span class="linenos"> 3</span><span class="n">lazy_static</span><span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 4</span><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">static</span><span class="w"> </span><span class="k">ref</span><span class="w"> </span><span class="n">TASK_MANAGER</span>: <span class="nc">TaskManager</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 5</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">num_app</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">get_num_app</span><span class="p">();</span><span class="w"></span>
-<span class="linenos"> 6</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">tasks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="n">TaskControlBlock</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 7</span><span class="w">            </span><span class="n">task_cx</span>: <span class="nc">TaskContext</span>::<span class="n">zero_init</span><span class="p">(),</span><span class="w"></span>
-<span class="linenos"> 8</span><span class="w">            </span><span class="n">task_status</span>: <span class="nc">TaskStatus</span>::<span class="n">UnInit</span><span class="p">,</span><span class="w"></span>
-<span class="linenos"> 9</span><span class="w">        </span><span class="p">};</span><span class="w"> </span><span class="n">MAX_APP_NUM</span><span class="p">];</span><span class="w"></span>
-<span class="linenos">10</span><span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">tasks</span><span class="p">.</span><span class="n">iter_mut</span><span class="p">().</span><span class="n">enumerate</span><span class="p">().</span><span class="n">take</span><span class="p">(</span><span class="n">num_app</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">11</span><span class="w">            </span><span class="n">t</span><span class="p">.</span><span class="n">task_cx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskContext</span>::<span class="n">goto_restore</span><span class="p">(</span><span class="n">init_app_cx</span><span class="p">(</span><span class="n">i</span><span class="p">));</span><span class="w"></span>
-<span class="linenos">12</span><span class="w">            </span><span class="n">t</span><span class="p">.</span><span class="n">task_status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStatus</span>::<span class="n">Ready</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">13</span><span class="w">        </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">14</span><span class="w">        </span><span class="n">TaskManager</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">15</span><span class="w">            </span><span class="n">num_app</span><span class="p">,</span><span class="w"></span>
-<span class="linenos">16</span><span class="w">            </span><span class="n">inner</span>: <span class="nc">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">17</span><span class="w">                </span><span class="n">UPSafeCell</span>::<span class="n">new</span><span class="p">(</span><span class="n">TaskManagerInner</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">18</span><span class="w">                    </span><span class="n">tasks</span><span class="p">,</span><span class="w"></span>
-<span class="linenos">19</span><span class="w">                    </span><span class="n">current_task</span>: <span class="mi">0</span><span class="p">,</span><span class="w"></span>
-<span class="linenos">20</span><span class="w">                </span><span class="p">})</span><span class="w"></span>
-<span class="linenos">21</span><span class="w">            </span><span class="p">},</span><span class="w"></span>
-<span class="linenos">22</span><span class="w">        </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">23</span><span class="w">    </span><span class="p">};</span><span class="w"></span>
-<span class="linenos">24</span><span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<ul class="simple">
-<li><p>第 5 行：调用 <code class="docutils literal notranslate"><span class="pre">loader</span></code> 子模块提供的 <code class="docutils literal notranslate"><span class="pre">get_num_app</span></code> 接口获取链接到内核的应用总数；</p></li>
-<li><p>第 10~12 行：依次对每个任务控制块进行初始化，将其运行状态设置为 <code class="docutils literal notranslate"><span class="pre">Ready</span></code> ，并在它的内核栈栈顶压入一些初始化
-上下文，然后更新它的 <code class="docutils literal notranslate"><span class="pre">task_cx</span></code> 。一些细节我们会稍后介绍。</p></li>
-<li><p>从第 14 行开始：创建 <code class="docutils literal notranslate"><span class="pre">TaskManager</span></code> 实例并返回。</p></li>
-</ul>
-<div class="admonition note">
-<p class="admonition-title">注解</p>
-<p>关于 Rust 迭代器语法如 <code class="docutils literal notranslate"><span class="pre">iter_mut/(a..b)</span></code> ，及其方法如 <code class="docutils literal notranslate"><span class="pre">enumerate/map/find/take</span></code>，请参考 Rust 官方文档。</p>
-</div>
-</div>
-<div class="section" id="sys-yield-sys-exit">
-<h2>实现 sys_yield 和 sys_exit<a class="headerlink" href="#sys-yield-sys-exit" title="永久链接至标题">¶</a></h2>
-<p><code class="docutils literal notranslate"><span class="pre">sys_yield</span></code> 的实现用到了 <code class="docutils literal notranslate"><span class="pre">task</span></code> 子模块提供的 <code class="docutils literal notranslate"><span class="pre">suspend_current_and_run_next</span></code> 接口，这个接口如字面含义，就是暂停当前的应用并切换到下个应用。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/syscall/process.rs</span>
+<p>它包含第二章提到的上下文、用户栈的信息，还新增了一个 <code class="docutils literal notranslate"><span class="pre">pub</span> <span class="pre">finish:</span> <span class="pre">bool</span></code> 用于标识当前任务是否以运行完成。此外，之前的上下文初始化移到了 <code class="docutils literal notranslate"><span class="pre">TaskControlBlock::init(entry)</span></code> 中，执行过程移到了 <code class="docutils literal notranslate"><span class="pre">TaskControlBlock::execute()</span></code> ，而处理 syscall 的流程则移动到 <code class="docutils literal notranslate"><span class="pre">TaskControlBlock::handle_syscall()</span></code> 中。</p>
+<p>有了这些封装之后，我们就可以将所有用户程序塞进一个数组里，用于之后的执行；</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/main.rs</span>
 
-<span class="k">use</span><span class="w"> </span><span class="k">crate</span>::<span class="n">task</span>::<span class="n">suspend_current_and_run_next</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">sys_yield</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">suspend_current_and_run_next</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="mi">0</span><span class="w"></span>
+<span class="c1">// 任务控制块</span>
+<span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">tcbs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="n">TaskControlBlock</span>::<span class="n">ZERO</span><span class="p">;</span><span class="w"> </span><span class="n">APP_CAPACITY</span><span class="p">];</span><span class="w"></span>
+<span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">index_mod</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
+<span class="c1">// 初始化</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">app</span><span class="p">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">tg_linker</span>::<span class="n">AppMeta</span>::<span class="n">locate</span><span class="p">().</span><span class="n">iter</span><span class="p">().</span><span class="n">enumerate</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">entry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">app</span><span class="p">.</span><span class="n">as_ptr</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">log</span>::<span class="n">info</span><span class="o">!</span><span class="p">(</span><span class="s">"load app{i} to {entry:#x}"</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">tcbs</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">init</span><span class="p">(</span><span class="n">entry</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">index_mod</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">sys_exit</span></code> 基于 <code class="docutils literal notranslate"><span class="pre">task</span></code> 子模块提供的 <code class="docutils literal notranslate"><span class="pre">exit_current_and_run_next</span></code> 接口，它的含义是退出当前的应用并切换到下个应用：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/syscall/process.rs</span>
-
-<span class="k">use</span><span class="w"> </span><span class="k">crate</span>::<span class="n">task</span>::<span class="n">exit_current_and_run_next</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">sys_exit</span><span class="p">(</span><span class="n">exit_code</span>: <span class="kt">i32</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">"[kernel] Application exited with code {}"</span><span class="p">,</span><span class="w"> </span><span class="n">exit_code</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="n">exit_current_and_run_next</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="fm">panic!</span><span class="p">(</span><span class="s">"Unreachable in sys_exit!"</span><span class="p">);</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</pre></div>
+<p>任务控制块非常重要。在内核中，它就是应用的管理单位。后面的章节中它会化身为 <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">Process</span></code> ，并增加更多内容，不过这就是另一个故事了。</p>
 </div>
-<p>那么 <code class="docutils literal notranslate"><span class="pre">suspend_current_and_run_next</span></code> 和 <code class="docutils literal notranslate"><span class="pre">exit_current_and_run_next</span></code> 各是如何实现的呢？</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/task/mod.rs</span>
+<div class="section" id="sys-sched-yield">
+<h2>实现 sys_sched_yield<a class="headerlink" href="#sys-sched-yield" title="永久链接至标题">¶</a></h2>
+<p>这个系统调用并不需要对单个程序内部做任何操作，因此它的实现和 <code class="docutils literal notranslate"><span class="pre">sys_exit</span></code> 一样，直接按规范返回 0。</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/main.rs</span>
 
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">suspend_current_and_run_next</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">TASK_MANAGER</span><span class="p">.</span><span class="n">mark_current_suspended</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="n">TASK_MANAGER</span><span class="p">.</span><span class="n">run_next_task</span><span class="p">();</span><span class="w"></span>
+<span class="k">impl</span><span class="w"> </span><span class="n">Process</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">SyscallContext</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="cp">#[inline]</span><span class="w"></span>
+<span class="w">    </span><span class="k">fn</span> <span class="nf">exit</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">_caller</span>: <span class="nc">tg_syscall</span>::<span class="n">Caller</span><span class="p">,</span><span class="w"> </span><span class="n">_status</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="mi">0</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">exit_current_and_run_next</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">TASK_MANAGER</span><span class="p">.</span><span class="n">mark_current_exited</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="n">TASK_MANAGER</span><span class="p">.</span><span class="n">run_next_task</span><span class="p">();</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>它们都是先修改当前应用的运行状态，然后尝试切换到下一个应用。修改运行状态比较简单，实现如下：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos">1</span><span class="c1">// os/src/task/mod.rs</span>
-<span class="linenos">2</span>
-<span class="linenos">3</span><span class="k">impl</span><span class="w"> </span><span class="n">TaskManager</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">4</span><span class="w">    </span><span class="k">fn</span> <span class="nf">mark_current_suspended</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">5</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">inner</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">inner</span><span class="p">.</span><span class="n">exclusive_access</span><span class="p">();</span><span class="w"></span>
-<span class="linenos">6</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">current</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inner</span><span class="p">.</span><span class="n">current_task</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">7</span><span class="w">        </span><span class="n">inner</span><span class="p">.</span><span class="n">tasks</span><span class="p">[</span><span class="n">current</span><span class="p">].</span><span class="n">task_status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStatus</span>::<span class="n">Ready</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">8</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">9</span><span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>以 <code class="docutils literal notranslate"><span class="pre">mark_current_suspended</span></code> 为例。首先获得里层 <code class="docutils literal notranslate"><span class="pre">TaskManagerInner</span></code> 的可变引用，然后修改任务控制块数组 <code class="docutils literal notranslate"><span class="pre">tasks</span></code> 中当前任务的状态。</p>
-<p>再看 <code class="docutils literal notranslate"><span class="pre">run_next_task</span></code> 的实现：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// os/src/task/mod.rs</span>
-<span class="linenos"> 2</span>
-<span class="linenos"> 3</span><span class="k">impl</span><span class="w"> </span><span class="n">TaskManager</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 4</span><span class="w">    </span><span class="k">fn</span> <span class="nf">run_next_task</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 5</span><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">next</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">find_next_task</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 6</span><span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">inner</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">inner</span><span class="p">.</span><span class="n">exclusive_access</span><span class="p">();</span><span class="w"></span>
-<span class="linenos"> 7</span><span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">current</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inner</span><span class="p">.</span><span class="n">current_task</span><span class="p">;</span><span class="w"></span>
-<span class="linenos"> 8</span><span class="w">            </span><span class="n">inner</span><span class="p">.</span><span class="n">tasks</span><span class="p">[</span><span class="n">next</span><span class="p">].</span><span class="n">task_status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStatus</span>::<span class="n">Running</span><span class="p">;</span><span class="w"></span>
-<span class="linenos"> 9</span><span class="w">            </span><span class="n">inner</span><span class="p">.</span><span class="n">current_task</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">next</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">10</span><span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">current_task_cx_ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">inner</span><span class="p">.</span><span class="n">tasks</span><span class="p">[</span><span class="n">current</span><span class="p">].</span><span class="n">task_cx</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">TaskContext</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">11</span><span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">next_task_cx_ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">inner</span><span class="p">.</span><span class="n">tasks</span><span class="p">[</span><span class="n">next</span><span class="p">].</span><span class="n">task_cx</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="n">TaskContext</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">12</span><span class="w">            </span><span class="nb">drop</span><span class="p">(</span><span class="n">inner</span><span class="p">);</span><span class="w"></span>
-<span class="linenos">13</span><span class="w">            </span><span class="c1">// before this, we should drop local variables that must be dropped manually</span>
-<span class="linenos">14</span><span class="w">            </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">15</span><span class="w">                </span><span class="n">__switch</span><span class="p">(</span><span class="n">current_task_cx_ptr</span><span class="p">,</span><span class="w"> </span><span class="n">next_task_cx_ptr</span><span class="p">);</span><span class="w"></span>
-<span class="linenos">16</span><span class="w">            </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">17</span><span class="w">            </span><span class="c1">// go back to user mode</span>
-<span class="linenos">18</span><span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">19</span><span class="w">            </span><span class="fm">panic!</span><span class="p">(</span><span class="s">"All applications completed!"</span><span class="p">);</span><span class="w"></span>
-<span class="linenos">20</span><span class="w">        </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">21</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">22</span>
-<span class="linenos">23</span><span class="w">    </span><span class="k">fn</span> <span class="nf">find_next_task</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nb">Option</span><span class="o">&lt;</span><span class="kt">usize</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">24</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">inner</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">inner</span><span class="p">.</span><span class="n">exclusive_access</span><span class="p">();</span><span class="w"></span>
-<span class="linenos">25</span><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">current</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inner</span><span class="p">.</span><span class="n">current_task</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">26</span><span class="w">        </span><span class="p">(</span><span class="n">current</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="o">..</span><span class="n">current</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">num_app</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"></span>
-<span class="linenos">27</span><span class="w">            </span><span class="p">.</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">id</span><span class="o">|</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">num_app</span><span class="p">)</span><span class="w"></span>
-<span class="linenos">28</span><span class="w">            </span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="o">|</span><span class="n">id</span><span class="o">|</span><span class="w"> </span><span class="n">inner</span><span class="p">.</span><span class="n">tasks</span><span class="p">[</span><span class="o">*</span><span class="n">id</span><span class="p">].</span><span class="n">task_status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">TaskStatus</span>::<span class="n">Ready</span><span class="p">)</span><span class="w"></span>
-<span class="linenos">29</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">30</span><span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p><code class="docutils literal notranslate"><span class="pre">run_next_task</span></code> 会调用 <code class="docutils literal notranslate"><span class="pre">find_next_task</span></code> 方法尝试寻找一个运行状态为 <code class="docutils literal notranslate"><span class="pre">Ready</span></code> 的应用并获得其 ID 。
-如果找不到， 说明所有应用都执行完了， <code class="docutils literal notranslate"><span class="pre">find_next_task</span></code> 将返回 <code class="docutils literal notranslate"><span class="pre">None</span></code> ，内核 panic 退出。
-如果能够找到下一个可运行应用，我们就调用 <code class="docutils literal notranslate"><span class="pre">__switch</span></code> 切换任务。</p>
-<p>切换任务之前，我们要手动 drop 掉我们获取到的 <code class="docutils literal notranslate"><span class="pre">TaskManagerInner</span></code> 可变引用。
-因为函数还没有返回， <code class="docutils literal notranslate"><span class="pre">inner</span></code> 不会自动销毁。我们只有令 <code class="docutils literal notranslate"><span class="pre">TASK_MANAGER</span></code> 的 <code class="docutils literal notranslate"><span class="pre">inner</span></code> 字段回到未被借用的状态，下次任务切换时才能再借用。</p>
-<p>我们可以总结一下应用的运行状态变化图：</p>
-<img alt="../_images/fsm-coop.png" src="../_images/fsm-coop.png"/>
-</div>
-<div class="section" id="id4">
-<h2>第一次进入用户态<a class="headerlink" href="#id4" title="永久链接至标题">¶</a></h2>
-<p>我们在第二章中介绍过 CPU 第一次从内核态进入用户态的方法，只需在内核栈上压入构造好的 Trap 上下文，
-然后 <code class="docutils literal notranslate"><span class="pre">__restore</span></code> 即可。本章要在此基础上做一些扩展。</p>
-<p>在初始化任务控制块时，我们是这样做的：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/task/mod.rs</span>
-
-<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">tasks</span><span class="p">.</span><span class="n">iter_mut</span><span class="p">().</span><span class="n">enumerate</span><span class="p">().</span><span class="n">take</span><span class="p">(</span><span class="n">num_app</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">t</span><span class="p">.</span><span class="n">task_cx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskContext</span>::<span class="n">goto_restore</span><span class="p">(</span><span class="n">init_app_cx</span><span class="p">(</span><span class="n">i</span><span class="p">));</span><span class="w"></span>
-<span class="w">    </span><span class="n">t</span><span class="p">.</span><span class="n">task_status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStatus</span>::<span class="n">Ready</span><span class="p">;</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p><code class="docutils literal notranslate"><span class="pre">init_app_cx</span></code> 在 <code class="docutils literal notranslate"><span class="pre">loader</span></code> 子模块中定义，它向内核栈压入了一个 Trap 上下文，并返回压入 Trap 上下文后 <code class="docutils literal notranslate"><span class="pre">sp</span></code> 的值。
-这个 Trap 上下文的构造方式与第二章相同。</p>
-<p><code class="docutils literal notranslate"><span class="pre">goto_restore</span></code> 保存传入的 <code class="docutils literal notranslate"><span class="pre">sp</span></code>，并将 <code class="docutils literal notranslate"><span class="pre">ra</span></code> 设置为 <code class="docutils literal notranslate"><span class="pre">__restore</span></code> 的入口地址，构造任务上下文后返回。这样，任务管理器中各个应用的任务上下文就得到了初始化。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/task/context.rs</span>
-
-<span class="k">impl</span><span class="w"> </span><span class="n">TaskContext</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">goto_restore</span><span class="p">(</span><span class="n">kstack_ptr</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">Self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">fn</span> <span class="nf">__restore</span><span class="p">();</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
-<span class="w">        </span><span class="bp">Self</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">            </span><span class="n">ra</span>: <span class="nc">__restore</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"></span>
-<span class="w">            </span><span class="n">sp</span>: <span class="nc">kstack_ptr</span><span class="p">,</span><span class="w"></span>
-<span class="w">            </span><span class="n">s</span>: <span class="p">[</span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="mi">12</span><span class="p">],</span><span class="w"></span>
-<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="k">impl</span><span class="w"> </span><span class="n">Scheduling</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">SyscallContext</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="cp">#[inline]</span><span class="w"></span>
+<span class="w">    </span><span class="k">fn</span> <span class="nf">sched_yield</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">_caller</span>: <span class="nc">tg_syscall</span>::<span class="n">Caller</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="mi">0</span><span class="w"></span>
 <span class="w">    </span><span class="p">}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>在 <code class="docutils literal notranslate"><span class="pre">rust_main</span></code> 中我们调用 <code class="docutils literal notranslate"><span class="pre">task::run_first_task</span></code> 来执行第一个应用：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// os/src/task/mod.rs</span>
-<span class="linenos"> 2</span>
-<span class="linenos"> 3</span><span class="k">fn</span> <span class="nf">run_first_task</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 4</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">inner</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">inner</span><span class="p">.</span><span class="n">exclusive_access</span><span class="p">();</span><span class="w"></span>
-<span class="linenos"> 5</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">task0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">inner</span><span class="p">.</span><span class="n">tasks</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span><span class="w"></span>
-<span class="linenos"> 6</span><span class="w">    </span><span class="n">task0</span><span class="p">.</span><span class="n">task_status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskStatus</span>::<span class="n">Running</span><span class="p">;</span><span class="w"></span>
-<span class="linenos"> 7</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">next_task_cx_ptr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">task0</span><span class="p">.</span><span class="n">task_cx</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">const</span><span class="w"> </span><span class="n">TaskContext</span><span class="p">;</span><span class="w"></span>
-<span class="linenos"> 8</span><span class="w">    </span><span class="nb">drop</span><span class="p">(</span><span class="n">inner</span><span class="p">);</span><span class="w"></span>
-<span class="linenos"> 9</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">_unused</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TaskContext</span>::<span class="n">zero_init</span><span class="p">();</span><span class="w"></span>
-<span class="linenos">10</span><span class="w">    </span><span class="c1">// before this, we should drop local variables that must be dropped manually</span>
-<span class="linenos">11</span><span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">12</span><span class="w">        </span><span class="n">__switch</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">_unused</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">TaskContext</span><span class="p">,</span><span class="w"> </span><span class="n">next_task_cx_ptr</span><span class="p">);</span><span class="w"></span>
-<span class="linenos">13</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">14</span><span class="w">    </span><span class="fm">panic!</span><span class="p">(</span><span class="s">"unreachable in run_first_task!"</span><span class="p">);</span><span class="w"></span>
-<span class="linenos">15</span><span class="p">}</span><span class="w"></span>
+<p>它和 <code class="docutils literal notranslate"><span class="pre">sys_exit</span></code> 的实际差别体现在 <code class="docutils literal notranslate"><span class="pre">TaskControlBlock::handle_syscall()</span></code> 中。任务控制块预先定义了几种“调度事件”，以此将 syscall 的执行结果返回给更上层的（接下来要介绍的）任务管理器。</p>
+<p>调度事件分别是：
+- <code class="docutils literal notranslate"><span class="pre">None</span></code> ， 表示处理了一个常规 Syscall；
+- <code class="docutils literal notranslate"><span class="pre">Yield</span></code>，表示处理了一个 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code>；
+- <code class="docutils literal notranslate"><span class="pre">Exit(usize)</span></code>，表示处理了一个 <code class="docutils literal notranslate"><span class="pre">sys_exit</span></code>，并包含返回值；
+- <code class="docutils literal notranslate"><span class="pre">UnsupportedSyscall(SyscallId)</span></code>，表示遇到本章节不支持的 syscall。</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/task.rs</span>
+<span class="sd">/// 调度事件。</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">enum</span> <span class="nc">SchedulingEvent</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="nb">None</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">Yield</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">Exit</span><span class="p">(</span><span class="kt">usize</span><span class="p">),</span><span class="w"></span>
+<span class="w">    </span><span class="n">UnsupportedSyscall</span><span class="p">(</span><span class="n">SyscallId</span><span class="p">),</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">TaskControlBlock</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="sd">/// 处理系统调用，返回是否应该终止程序。</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">handle_syscall</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">SchedulingEvent</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="n">tg_syscall</span>::<span class="p">{</span><span class="n">SyscallId</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">Id</span><span class="p">,</span><span class="w"> </span><span class="n">SyscallResult</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">Ret</span><span class="p">};</span><span class="w"></span>
+<span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="n">SchedulingEvent</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">Event</span><span class="p">;</span><span class="w"></span>
+
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">ctx</span><span class="p">.</span><span class="n">a</span><span class="p">(</span><span class="mi">7</span><span class="p">).</span><span class="n">into</span><span class="p">();</span><span class="w"></span>
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">args</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="o">..</span><span class="p">.</span><span class="w"> </span><span class="p">];</span><span class="w"></span>
+<span class="w">    </span><span class="k">match</span><span class="w"> </span><span class="n">tg_syscall</span>::<span class="n">handle</span><span class="p">(</span><span class="n">Caller</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">entity</span>: <span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">flow</span>: <span class="mi">0</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">args</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">Ret</span>::<span class="n">Done</span><span class="p">(</span><span class="n">ret</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">Id</span>::<span class="n">EXIT</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">Event</span>::<span class="n">Exit</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">ctx</span><span class="p">.</span><span class="n">a</span><span class="p">(</span><span class="mi">0</span><span class="p">)),</span><span class="w"></span>
+<span class="w">            </span><span class="n">Id</span>::<span class="n">SCHED_YIELD</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="o">*</span><span class="bp">self</span><span class="p">.</span><span class="n">ctx</span><span class="p">.</span><span class="n">a_mut</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">;</span><span class="w"></span>
+<span class="w">                </span><span class="bp">self</span><span class="p">.</span><span class="n">ctx</span><span class="p">.</span><span class="n">move_next</span><span class="p">();</span><span class="w"></span>
+<span class="w">                </span><span class="n">Event</span>::<span class="n">Yield</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">            </span><span class="n">_</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="o">*</span><span class="bp">self</span><span class="p">.</span><span class="n">ctx</span><span class="p">.</span><span class="n">a_mut</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ret</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">;</span><span class="w"></span>
+<span class="w">                </span><span class="bp">self</span><span class="p">.</span><span class="n">ctx</span><span class="p">.</span><span class="n">move_next</span><span class="p">();</span><span class="w"></span>
+<span class="w">                </span><span class="n">Event</span>::<span class="nb">None</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">        </span><span class="p">},</span><span class="w"></span>
+<span class="w">        </span><span class="n">Ret</span>::<span class="n">Unsupported</span><span class="p">(</span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">Event</span>::<span class="n">UnsupportedSyscall</span><span class="p">(</span><span class="n">id</span><span class="p">),</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>我们显式声明了一个 <code class="docutils literal notranslate"><span class="pre">_unused</span></code> 变量，并将它的地址作为第一个参数传给 <code class="docutils literal notranslate"><span class="pre">__switch</span></code> ，
-声明此变量的意义仅仅是为了避免其他数据被覆盖。</p>
-<p>在 <code class="docutils literal notranslate"><span class="pre">__switch</span></code> 中恢复 <code class="docutils literal notranslate"><span class="pre">sp</span></code> 后， <code class="docutils literal notranslate"><span class="pre">sp</span></code> 将指向 <code class="docutils literal notranslate"><span class="pre">init_app_cx</span></code> 构造的 Trap 上下文，后面就回到第二章的情况了。
-此外， <code class="docutils literal notranslate"><span class="pre">__restore</span></code> 的实现需要做出变化：它 <strong>不再需要</strong> 在开头 <code class="docutils literal notranslate"><span class="pre">mv</span> <span class="pre">sp,</span> <span class="pre">a0</span></code> 了。因为在 <code class="docutils literal notranslate"><span class="pre">__switch</span></code> 之后，<code class="docutils literal notranslate"><span class="pre">sp</span></code> 就已经正确指向了我们需要的 Trap 上下文地址。</p>
+</div>
+<div class="section" id="id3">
+<h2>任务管理器<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h2>
+<p>内核需要一个全局的任务管理器来管理这些任务控制块，并根据它们执行时的结果进行调度。
+本章节比较偷懒，直接写在了 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 中。它的外层框架如下</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// ch3/src/main.rs</span>
+<span class="linenos"> 2</span>
+<span class="linenos"> 3</span><span class="c1">// 多道执行</span>
+<span class="linenos"> 4</span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">remain</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">index_mod</span><span class="p">;</span><span class="w"></span>
+<span class="linenos"> 5</span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="k">usize</span><span class="p">;</span><span class="w"></span>
+<span class="linenos"> 6</span><span class="k">while</span><span class="w"> </span><span class="n">remain</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos"> 7</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">tcb</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">tcbs</span><span class="p">[</span><span class="n">i</span><span class="p">];</span><span class="w"></span>
+<span class="linenos"> 8</span><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="o">!</span><span class="n">tcb</span><span class="p">.</span><span class="n">finish</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos"> 9</span><span class="w">        </span><span class="k">loop</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">10</span><span class="w">            </span><span class="cp">#[cfg(not(feature = </span><span class="s">"coop"</span><span class="cp">))]</span><span class="w"></span>
+<span class="linenos">11</span><span class="w">            </span><span class="n">tg_sbi</span>::<span class="n">set_timer</span><span class="p">(</span><span class="n">time</span>::<span class="n">read64</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">12500</span><span class="p">);</span><span class="w"></span>
+<span class="linenos">12</span><span class="w">            </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">tcb</span><span class="p">.</span><span class="n">execute</span><span class="p">()</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+<span class="linenos">13</span>
+<span class="linenos">14</span><span class="w">            </span><span class="k">use</span><span class="w"> </span><span class="n">scause</span>::<span class="o">*</span><span class="p">;</span><span class="w"></span>
+<span class="linenos">15</span><span class="w">            </span><span class="kd">let</span><span class="w"> </span><span class="n">finish</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">16</span><span class="w">                </span><span class="o">..</span><span class="p">.</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="k">continue</span><span class="p">,</span><span class="w"></span>
+<span class="linenos">17</span><span class="w">                </span><span class="o">..</span><span class="p">.</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="o">..</span><span class="p">.</span><span class="w"></span>
+<span class="linenos">18</span><span class="w">            </span><span class="p">};</span><span class="w"></span>
+<span class="linenos">19</span><span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="n">finish</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">20</span><span class="w">                </span><span class="n">tcb</span><span class="p">.</span><span class="n">finish</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">;</span><span class="w"></span>
+<span class="linenos">21</span><span class="w">                </span><span class="n">remain</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"></span>
+<span class="linenos">22</span><span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">23</span><span class="w">            </span><span class="k">break</span><span class="p">;</span><span class="w"></span>
+<span class="linenos">24</span><span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">25</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">26</span><span class="w">    </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">index_mod</span><span class="p">;</span><span class="w"></span>
+<span class="linenos">27</span><span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>第 2 行：记录还未结束的程序个数。</p></li>
+<li><p>第 4~6 行与 24 行：循环选择未结束的程序并运行</p></li>
+<li><p>第 8~9 行：设置时间中断（下一节介绍），先略过。</p></li>
+<li><p>第 13~21 行：检查当前程序运行状态，如走到 continue 分支则继续运行当前程序，否则暂停并运行下一个程序。并顺便标记当前程序是否结束。</p></li>
+</ul>
+<p>而内层判断 <code class="docutils literal notranslate"><span class="pre">finish</span></code> 的部分如下：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// ch3/src/main.rs</span>
+<span class="linenos"> 2</span>
+<span class="linenos"> 3</span><span class="kd">let</span><span class="w"> </span><span class="n">finish</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">scause</span>::<span class="n">read</span><span class="p">().</span><span class="n">cause</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos"> 4</span><span class="w">    </span><span class="n">Trap</span>::<span class="n">Interrupt</span><span class="p">(</span><span class="n">Interrupt</span>::<span class="n">SupervisorTimer</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos"> 5</span><span class="w">        </span><span class="n">tg_sbi</span>::<span class="n">set_timer</span><span class="p">(</span><span class="kt">u64</span>::<span class="n">MAX</span><span class="p">);</span><span class="w"></span>
+<span class="linenos"> 6</span><span class="w">        </span><span class="n">log</span>::<span class="n">trace</span><span class="o">!</span><span class="p">(</span><span class="s">"app{i} timeout"</span><span class="p">);</span><span class="w"></span>
+<span class="linenos"> 7</span><span class="w">        </span><span class="kc">false</span><span class="w"></span>
+<span class="linenos"> 8</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="linenos"> 9</span><span class="w">    </span><span class="n">Trap</span>::<span class="n">Exception</span><span class="p">(</span><span class="n">Exception</span>::<span class="n">UserEnvCall</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">10</span><span class="w">        </span><span class="k">use</span><span class="w"> </span><span class="n">task</span>::<span class="n">SchedulingEvent</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">Event</span><span class="p">;</span><span class="w"></span>
+<span class="linenos">11</span><span class="w">        </span><span class="k">match</span><span class="w"> </span><span class="n">tcb</span><span class="p">.</span><span class="n">handle_syscall</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">12</span><span class="w">            </span><span class="n">Event</span>::<span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="k">continue</span><span class="p">,</span><span class="w"></span>
+<span class="linenos">13</span><span class="w">            </span><span class="n">Event</span>::<span class="n">Exit</span><span class="p">(</span><span class="n">code</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">14</span><span class="w">                </span><span class="n">log</span>::<span class="n">info</span><span class="o">!</span><span class="p">(</span><span class="s">"app{i} exit with code {code}"</span><span class="p">);</span><span class="w"></span>
+<span class="linenos">15</span><span class="w">                </span><span class="kc">true</span><span class="w"></span>
+<span class="linenos">16</span><span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">17</span><span class="w">            </span><span class="n">Event</span>::<span class="n">Yield</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">18</span><span class="w">                </span><span class="n">log</span>::<span class="n">debug</span><span class="o">!</span><span class="p">(</span><span class="s">"app{i} yield"</span><span class="p">);</span><span class="w"></span>
+<span class="linenos">19</span><span class="w">                </span><span class="kc">false</span><span class="w"></span>
+<span class="linenos">20</span><span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">21</span><span class="w">            </span><span class="n">Event</span>::<span class="n">UnsupportedSyscall</span><span class="p">(</span><span class="n">id</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">22</span><span class="w">                </span><span class="n">log</span>::<span class="n">error</span><span class="o">!</span><span class="p">(</span><span class="s">"app{i} call an unsupported syscall {}"</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="p">.</span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="linenos">23</span><span class="w">                </span><span class="kc">true</span><span class="w"></span>
+<span class="linenos">24</span><span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">25</span><span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">26</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">27</span><span class="w">    </span><span class="n">Trap</span>::<span class="n">Exception</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">28</span><span class="w">        </span><span class="n">log</span>::<span class="n">error</span><span class="o">!</span><span class="p">(</span><span class="s">"app{i} was killed by {e:?}"</span><span class="p">);</span><span class="w"></span>
+<span class="linenos">29</span><span class="w">        </span><span class="kc">true</span><span class="w"></span>
+<span class="linenos">30</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">31</span><span class="w">    </span><span class="n">Trap</span>::<span class="n">Interrupt</span><span class="p">(</span><span class="n">ir</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="linenos">32</span><span class="w">        </span><span class="n">log</span>::<span class="n">error</span><span class="o">!</span><span class="p">(</span><span class="s">"app{i} was killed by an unexpected interrupt {ir:?}"</span><span class="p">);</span><span class="w"></span>
+<span class="linenos">33</span><span class="w">        </span><span class="kc">true</span><span class="w"></span>
+<span class="linenos">34</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="linenos">35</span><span class="p">};</span><span class="w"></span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>第 4~8 行：触发时钟中断（下一节介绍），当前程序未结束，切换下一个程序。</p></li>
+<li><dl class="simple">
+<dt>第 9~26 行：是系统调用，此时需通过 <code class="docutils literal notranslate"><span class="pre">TaskControlBlock::handle_syscall()</span></code> 完成系统调用并处理完成情况。注意此后的返回值 <strong>都是任务控制块自己定义的返回值，不是 syscall 规范中的返回值</strong> 。</dt><dd><ul>
+<li><p>第 12 行：系统调用正常完成，当前程序未结束，且继续运行。</p></li>
+<li><p>第 13~16 行：已触发 <code class="docutils literal notranslate"><span class="pre">sys_exit</span></code>，标记当前程序结束。</p></li>
+<li><p>第 17~20 行：已触发 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code>，当前程序未结束，切换下一个程序。</p></li>
+<li><p>第 21~24 行：遇到不支持的 syscall，标记当前程序结束。</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><p>第 27~30 行：遇到异常，标记当前程序结束。</p></li>
+<li><p>第 31~34 行，遇到不支持的中断，标记当前程序结束。</p></li>
+</ul>
+</div>
+<div class="section" id="id4">
+<h2>小结<a class="headerlink" href="#id4" title="永久链接至标题">¶</a></h2>
+<p>我们首先通过任务控制块的包装，把加载进来的所有用户程序塞进一个数组里，然后通过实现了一个简易任务管理器，控制它们轮流运行。
+在运行过程中，用户程序可以调用 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code> 来提示内核将当前任务暂时挂起，切换到其他任务执行。而内核则通过调度事件，将这一信息传递给上层的任务管理器，实现调度。</p>
+<p>但是，如果有程序完全不使用 <code class="docutils literal notranslate"><span class="pre">sys_sched_yield</span></code> ，就能长时间霸占 CPU 直到运行结束。
+有没有什么办法无需依赖主动的系统调用，而是让程序被动让出 CPU 呢？
+下一节我们将介绍上面几段代码中埋下的伏笔——时钟中断机制。</p>
 </div>
 </div>
 
@@ -544,14 +505,14 @@
               </div>
               <svg><use href="#svg-arrow-right"></use></svg>
             </a>
-          <a class="prev-page" href="2task-switching.html">
+          <a class="prev-page" href="1multi-loader.html">
               <svg><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">任务切换</div>
+                <div class="title">多道程序放置与加载</div>
                 
               </div>
             </a>
@@ -588,9 +549,9 @@
 <li><a class="reference internal" href="#">管理多道程序</a><ul>
 <li><a class="reference internal" href="#yield">yield 系统调用</a></li>
 <li><a class="reference internal" href="#id2">任务控制块与任务运行状态</a></li>
+<li><a class="reference internal" href="#sys-sched-yield">实现 sys_sched_yield</a></li>
 <li><a class="reference internal" href="#id3">任务管理器</a></li>
-<li><a class="reference internal" href="#sys-yield-sys-exit">实现 sys_yield 和 sys_exit</a></li>
-<li><a class="reference internal" href="#id4">第一次进入用户态</a></li>
+<li><a class="reference internal" href="#id4">小结</a></li>
 </ul>
 </li>
 </ul>
