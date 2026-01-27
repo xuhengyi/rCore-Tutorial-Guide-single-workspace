@@ -19,6 +19,7 @@
 在 ``rCore-Tutorial-in-single-workspace`` 项目中运行本章代码（ ``DEBUG`` 类型的调试输出过多，建议使用 ``LOG=INFO`` 过滤输出）：
 
 .. code-block:: console
+   
    $ LOG=INFO cargo qemu --ch 3
 
 运行后，看到用户程序交替输出信息：

@@ -264,80 +264,153 @@
 <h1>分时多任务系统<a class="headerlink" href="#id1" title="永久链接至标题">¶</a></h1>
 <p>现代的任务调度算法基本都是抢占式的，它要求每个应用只能连续执行一段时间，然后内核就会将它强制性切换出去。
 一般将 <strong>时间片</strong> (Time Slice) 作为应用连续执行时长的度量单位，每个时间片可能在毫秒量级。
-简单起见，我们使用 <strong>时间片轮转算法</strong> (RR, Round-Robin) 来对应用进行调度。</p>
+简单起见，我们使用 <strong>时间片轮转算法</strong> (RR, Round-Robin) 来调度应用。
+这个算法轮流切换每一个应用，然后运行一个固定长度的时间片。</p>
 <div class="section" id="id2">
-<h2>时钟中断与计时器<a class="headerlink" href="#id2" title="永久链接至标题">¶</a></h2>
-<p>实现调度算法需要计时。RISC-V 要求处理器维护时钟计数器 <code class="docutils literal notranslate"><span class="pre">mtime</span></code>，还有另外一个 CSR <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code> 。
-一旦计数器 <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 的值超过了 <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code>，就会触发一次时钟中断。</p>
-<p>运行在 M 特权级的 SEE 已经预留了相应的接口，基于此编写的 <code class="docutils literal notranslate"><span class="pre">get_time</span></code> 函数可以取得当前 <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 计数器的值；</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/timer.rs</span>
+<h2>计时器<a class="headerlink" href="#id2" title="永久链接至标题">¶</a></h2>
+<p>实现调度算法需要计时。在 RISC-V 架构下，处理器维护两个特权寄存器：  <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 和 <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code> 。
+计数器 <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 的值会由处理器自行递增，一旦它超过了 <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code>，就会触发一次时钟中断。</p>
+<p>运行在机器态(M模式)的 SEE 已经预留了相应的接口。我们可以使用 <code class="docutils literal notranslate"><span class="pre">crate</span> <span class="pre">riscv</span></code> 提供的方法直接获取 <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 寄存器的值。
+在 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 的 <code class="docutils literal notranslate"><span class="pre">impl</span> <span class="pre">Clock</span> <span class="pre">for</span> <span class="pre">SyscallContext</span></code> 中就有这样一个例子（第 173 行）；</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/main.rs</span>
 
-<span class="k">use</span><span class="w"> </span><span class="n">riscv</span>::<span class="n">register</span>::<span class="n">time</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">get_time</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">usize</span> <span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">time</span>::<span class="n">read</span><span class="p">()</span><span class="w"></span>
+<span class="n">ClockId</span>::<span class="n">CLOCK_MONOTONIC</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">time</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">riscv</span>::<span class="n">register</span>::<span class="n">time</span>::<span class="n">read</span><span class="p">()</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">10000</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">125</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="o">*</span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="o">*</span><span class="p">(</span><span class="n">tp</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">TimeSpec</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TimeSpec</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">tv_sec</span>: <span class="nc">time</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">1_000_000_000</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">tv_nsec</span>: <span class="nc">time</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">1_000_000_000</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="p">};</span><span class="w"></span>
+<span class="w">    </span><span class="mi">0</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>在 10 ms 后设置时钟中断的代码如下：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// os/src/sbi.rs</span>
-<span class="linenos"> 2</span>
-<span class="linenos"> 3</span><span class="k">const</span><span class="w"> </span><span class="n">SBI_SET_TIMER</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
-<span class="linenos"> 4</span>
-<span class="linenos"> 5</span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">set_timer</span><span class="p">(</span><span class="n">timer</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 6</span><span class="w">    </span><span class="n">sbi_call</span><span class="p">(</span><span class="n">SBI_SET_TIMER</span><span class="p">,</span><span class="w"> </span><span class="n">timer</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
-<span class="linenos"> 7</span><span class="p">}</span><span class="w"></span>
-<span class="linenos"> 8</span>
-<span class="linenos"> 9</span><span class="c1">// os/src/timer.rs</span>
-<span class="linenos">10</span>
-<span class="linenos">11</span><span class="k">use</span><span class="w"> </span><span class="k">crate</span>::<span class="n">config</span>::<span class="n">CLOCK_FREQ</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">12</span><span class="k">const</span><span class="w"> </span><span class="n">TICKS_PER_SEC</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mi">100</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">13</span>
-<span class="linenos">14</span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">set_next_trigger</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">15</span><span class="w">    </span><span class="n">set_timer</span><span class="p">(</span><span class="n">get_time</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">CLOCK_FREQ</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">TICKS_PER_SEC</span><span class="p">);</span><span class="w"></span>
-<span class="linenos">16</span><span class="p">}</span><span class="w"></span>
+<p>其中，由于 qemu 的默认频率是 1.25MHz，所以从寄存器中读出的主频需要运算后才能得到以秒/纳秒为单位的时间。</p>
+<p>类似地，例如我们想在 10 ms 后设置时钟中断，就可以参考在 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 的 <code class="docutils literal notranslate"><span class="pre">fn</span> <span class="pre">rust_main()</span></code> 中的例子（第 57 行）；</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/main.rs</span>
+
+<span class="n">tg_sbi</span>::<span class="n">set_timer</span><span class="p">(</span><span class="n">time</span>::<span class="n">read64</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">12500</span><span class="p">);</span><span class="w"></span>
 </pre></div>
 </div>
-<ul>
-<li><p>第 5 行， <code class="docutils literal notranslate"><span class="pre">sbi</span></code> 子模块有一个 <code class="docutils literal notranslate"><span class="pre">set_timer</span></code> 调用，用来设置 <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code> 的值。</p></li>
-<li><p>第 14 行， <code class="docutils literal notranslate"><span class="pre">timer</span></code> 子模块的 <code class="docutils literal notranslate"><span class="pre">set_next_trigger</span></code> 函数对 <code class="docutils literal notranslate"><span class="pre">set_timer</span></code> 进行了封装，
-它首先读取当前 <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 的值，然后计算出 10ms 之内计数器的增量，再将 <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code> 设置为二者的和。
-这样，10ms 之后一个 S 特权级时钟中断就会被触发。</p>
-<p>至于增量的计算方式， <code class="docutils literal notranslate"><span class="pre">CLOCK_FREQ</span></code> 是一个预先获取到的各平台不同的时钟频率，单位为赫兹，也就是一秒钟之内计数器的增量。
-它可以在 <code class="docutils literal notranslate"><span class="pre">config</span></code> 子模块中找到。10ms 的话只需除以常数 <code class="docutils literal notranslate"><span class="pre">TICKS_PER_SEC</span></code> 也就是 100 即可。</p>
-</li>
+<p>其中 <code class="docutils literal notranslate"><span class="pre">time::read64()</span></code> 读取当前时间， 12500 tick 正好对应 qemu 频率算出的 10 ms。</p>
+<p>这个方法的底层实现要复杂一些，它实际上是内核态(S模式)向机器态(M模式)发送了一个 <code class="docutils literal notranslate"><span class="pre">sbi_call</span></code>，陷入机器态处理（就像用户向内核发送 <code class="docutils literal notranslate"><span class="pre">syscall</span></code> 然后陷入内核处理）。</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// tg-sbi/src/lib.rs</span>
+
+<span class="sd">/// 设置下一次定时器中断的时间。</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">set_timer</span><span class="p">(</span><span class="n">timer</span>: <span class="kt">u64</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">sbi_call</span><span class="p">(</span><span class="n">SBI_EXT_TIMER</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">timer</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>随后， <code class="docutils literal notranslate"><span class="pre">tg-sbi</span></code> 在机器态通过 <code class="docutils literal notranslate"><span class="pre">handle_timer(u64)</span></code> 来处理这个请求：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// tg-sbi/src/msbi.rs</span>
+
+<span class="sd">/// 处理 Timer 扩展（EID 0x54494D45）。</span>
+<span class="k">fn</span> <span class="nf">handle_timer</span><span class="p">(</span><span class="n">time</span>: <span class="kt">u64</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">SbiRet</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">CLINT_MTIMECMP</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mh">0x200_4000</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// SAFETY: 向 QEMU virt 机器的已知 MMIO 地址写入 CLINT mtimecmp 寄存器。</span>
+<span class="w">    </span><span class="c1">// 这将设置下一次定时器中断的触发时间。</span>
+<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="p">(</span><span class="n">CLINT_MTIMECMP</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="kt">u64</span><span class="p">).</span><span class="n">write_volatile</span><span class="p">(</span><span class="n">time</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// 清除挂起的 S-mode 定时器中断</span>
+<span class="w">    </span><span class="c1">// SAFETY: 修改 mip CSR 以清除 STIP 位是有效的 M-mode 操作。</span>
+<span class="w">    </span><span class="c1">// 这是确认定时器中断所必需的。</span>
+<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="fm">asm!</span><span class="p">(</span><span class="w"></span>
+<span class="w">            </span><span class="s">"csrc mip, {}"</span><span class="p">,</span><span class="w"></span>
+<span class="w">            </span><span class="k">in</span><span class="p">(</span><span class="n">reg</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">5</span><span class="p">),</span><span class="w"> </span><span class="c1">// Clear STIP</span>
+<span class="w">        </span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="n">SbiRet</span>::<span class="n">success</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>它主要完成两件事：</p>
+<ul class="simple">
+<li><p>首先通过 MMIO 写入 <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code> 寄存器。</p></li>
+<li><p>然后写入 <code class="docutils literal notranslate"><span class="pre">mip</span></code> 的 <code class="docutils literal notranslate"><span class="pre">STIP</span></code> 标志位，相当于关掉“闹钟”，才能等待它下一次响起。</p></li>
 </ul>
-<p>后面可能还有一些计时的需求，我们再设计一个函数：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/timer.rs</span>
+<div class="admonition note">
+<p class="admonition-title">注解</p>
+<p><code class="docutils literal notranslate"><span class="pre">m_entry.asm</span></code> 和 <code class="docutils literal notranslate"><span class="pre">msbi.rs</span></code> 中的代码处于机器态，并不引入 <code class="docutils literal notranslate"><span class="pre">crate</span> <span class="pre">riscv</span></code> ，因此只能通过 MMIO 写入定时器。MMIO 会在第六章中详细介绍，但简单来说， <code class="docutils literal notranslate"><span class="pre">qemu</span></code> 虚拟机启动时，会将一些寄存器映射到固定的内存地址上，所以代码中会有直接对着常量地址写入的操作。</p>
+</div>
+<div class="admonition hint">
+<p class="admonition-title">提示</p>
+<p>感兴趣的同学可以尝试阅读 <code class="docutils literal notranslate"><span class="pre">tg-sbi/src/m_entry.asm</span></code> 和 <code class="docutils literal notranslate"><span class="pre">tg-sbi/src/msbi.rs</span></code>，了解机器态实现的细节。这些代码其实不属于内核。通常而言，内核不会自己手写一个 <code class="docutils literal notranslate"><span class="pre">sbi</span></code> ，而是使用 <code class="docutils literal notranslate"><span class="pre">qemu</span></code> 自带的 <code class="docutils literal notranslate"><span class="pre">OpenSBI</span></code> 或 <a class="reference external" href="https://github.com/rustsbi/rustsbi-qemu/">RustSBI</a> 等成熟方案。</p>
+</div>
+</div>
+<div class="section" id="id3">
+<h2>时钟中断与抢占式调度<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h2>
+<p>上文提到，一旦 <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 的值超过 <code class="docutils literal notranslate"><span class="pre">mtimecmp</span></code>，就会触发一次时钟中断。</p>
+<p>在内核启动时，时钟中断是默认被屏蔽的。需要修改 <code class="docutils literal notranslate"><span class="pre">sie</span></code> 寄存器手动打开中断，如 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 第 48 行：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/main.rs</span>
 
-<span class="k">const</span><span class="w"> </span><span class="n">MICRO_PER_SEC</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mi">1_000_000</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">get_time_us</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">usize</span> <span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">time</span>::<span class="n">read</span><span class="p">()</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="n">CLOCK_FREQ</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">MICRO_PER_SEC</span><span class="p">)</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<span class="c1">// 打开中断</span>
+<span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">sie</span>::<span class="n">set_stimer</span><span class="p">()</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
 </pre></div>
 </div>
-<p><code class="docutils literal notranslate"><span class="pre">timer</span></code> 子模块的 <code class="docutils literal notranslate"><span class="pre">get_time_us</span></code> 可以以微秒为单位返回当前计数器的值。</p>
-<p>新增一个系统调用，使应用能获取当前的时间：</p>
+<p>类似 <code class="docutils literal notranslate"><span class="pre">syscall</span></code> ，时钟中断触发后也会陷入内核。不过此时异常中断的原因会被标记为 <code class="docutils literal notranslate"><span class="pre">Trap::Interrupt(Interrupt::SupervisorTimer)</span></code>。 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 第 54 行开始的代码演示了如何处理时钟中断：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// ch3/src/main.rs</span>
+
+<span class="k">if</span><span class="w"> </span><span class="o">!</span><span class="n">tcb</span><span class="p">.</span><span class="n">finish</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">loop</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="cp">#[cfg(not(feature = </span><span class="s">"coop"</span><span class="cp">))]</span><span class="w"></span>
+<span class="w">        </span><span class="n">tg_sbi</span>::<span class="n">set_timer</span><span class="p">(</span><span class="n">time</span>::<span class="n">read64</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">12500</span><span class="p">);</span><span class="w"></span>
+<span class="w">        </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">tcb</span><span class="p">.</span><span class="n">execute</span><span class="p">()</span><span class="w"> </span><span class="p">};</span><span class="w"></span>
+
+<span class="w">        </span><span class="k">use</span><span class="w"> </span><span class="n">scause</span>::<span class="o">*</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">finish</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">scause</span>::<span class="n">read</span><span class="p">().</span><span class="n">cause</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">            </span><span class="n">Trap</span>::<span class="n">Interrupt</span><span class="p">(</span><span class="n">Interrupt</span>::<span class="n">SupervisorTimer</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="n">tg_sbi</span>::<span class="n">set_timer</span><span class="p">(</span><span class="kt">u64</span>::<span class="n">MAX</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="n">log</span>::<span class="n">trace</span><span class="o">!</span><span class="p">(</span><span class="s">"app{i} timeout"</span><span class="p">);</span><span class="w"></span>
+<span class="w">                </span><span class="kc">false</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">            </span><span class="n">Trap</span>::<span class="n">Exception</span><span class="p">(</span><span class="n">Exception</span>::<span class="n">UserEnvCall</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">                </span><span class="o">......</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">        </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>如上述代码所示，除非命令专门指定了 <code class="docutils literal notranslate"><span class="pre">coop</span></code> 属性（合作调度），否则在应用正式通过 <code class="docutils literal notranslate"><span class="pre">unsafe</span> <span class="pre">{</span> <span class="pre">tcb.execute()</span> <span class="pre">};</span></code> 运行前就会设置一个 12500 tick(=10 ms) 的计时器。
+在处理异常中断时，如果发现触发的是 <code class="docutils literal notranslate"><span class="pre">Trap::Interrupt(Interrupt::SupervisorTimer)</span></code> ，就说明当前应用已用完了它的时间片。于是我们标记当前应用未结束运行，然后让 <code class="docutils literal notranslate"><span class="pre">loop</span> <span class="pre">{</span></code> 去运行下一个应用。</p>
+<p>结合上一小节的介绍，我们最终实现了时间片轮转任务调度算法。 <code class="docutils literal notranslate"><span class="pre">power</span></code> 系列用户程序可以验证我们取得的成果：这些应用并没有主动 yield，内核仍能公平地把时间片分配给它们。</p>
+</div>
+<div class="section" id="clock-gettime">
+<h2>clock_gettime 系统调用<a class="headerlink" href="#clock-gettime" title="永久链接至标题">¶</a></h2>
+<p>至此，内核已经可以自由地获取时间、设置定时器。
+但用户态(U模式)的应用并不能直接访问 <code class="docutils literal notranslate"><span class="pre">mtime</span></code> 等寄存器。
+我们还需要新增一个系统调用，使应用获取当前的时间：</p>
 <div class="literal-block-wrapper docutils container" id="id4">
 <div class="code-block-caption"><span class="caption-text">第三章新增系统调用（二）</span><a class="headerlink" href="#id4" title="永久链接至代码">¶</a></div>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="sd">/// 功能：获取当前的时间，保存在 TimeVal 结构体 ts 中，_tz 在我们的实现中忽略</span>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="sd">/// 功能：获取 clockid 对应计时器的时间，例如全局计时器 CLOCK_MONOTONIC 的编号为 1。然后，保存在 TimeSpec 结构体 tp 中。</span>
 <span class="sd">/// 返回值：返回是否执行成功，成功则返回 0</span>
-<span class="sd">/// syscall ID：169</span>
-<span class="k">fn</span> <span class="nf">sys_get_time</span><span class="p">(</span><span class="n">ts</span>: <span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">TimeVal</span><span class="p">,</span><span class="w"> </span><span class="n">_tz</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span><span class="p">;</span><span class="w"></span>
-</pre></div>
-</div>
-</div>
-<p>结构体 <code class="docutils literal notranslate"><span class="pre">TimeVal</span></code> 的定义如下，内核只需调用 <code class="docutils literal notranslate"><span class="pre">get_time_us</span></code> 即可实现该系统调用。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/syscall/process.rs</span>
+<span class="sd">/// syscall ID：113</span>
+<span class="k">fn</span> <span class="nf">clock_gettime</span><span class="p">(</span><span class="n">clockid</span>: <span class="nc">ClockId</span><span class="p">,</span><span class="w"> </span><span class="n">tp</span>: <span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">TimeSpec</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span><span class="p">;</span><span class="w"></span>
 
+<span class="c1">// tg-syscall/src/time.rs</span>
+<span class="cp">#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug)]</span><span class="w"></span>
 <span class="cp">#[repr(C)]</span><span class="w"></span>
-<span class="k">pub</span><span class="w"> </span><span class="k">struct</span> <span class="nc">TimeVal</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">sec</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"></span>
-<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">usec</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span> <span class="nc">TimeSpec</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// seconds</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">tv_sec</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// nanoseconds</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">tv_nsec</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
+</div>
+<p>用户库对应的实现和封装：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// user/src/lib.rs</span>
+
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">get_time</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">time</span>: <span class="nc">TimeSpec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TimeSpec</span>::<span class="n">ZERO</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="n">clock_gettime</span><span class="p">(</span><span class="n">ClockId</span>::<span class="n">CLOCK_MONOTONIC</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">time</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="n">_</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">(</span><span class="n">time</span><span class="p">.</span><span class="n">tv_sec</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1000</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">time</span><span class="p">.</span><span class="n">tv_nsec</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">1_000_000</span><span class="p">)</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">isize</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+<p>上述 <code class="docutils literal notranslate"><span class="pre">get_time</span></code> 函数返回一个整数，表示系统启动后运行的毫秒数。</p>
 </div>
 <div class="section" id="risc-v">
 <h2>RISC-V 架构中的嵌套中断问题<a class="headerlink" href="#risc-v" title="永久链接至标题">¶</a></h2>
@@ -355,45 +428,6 @@
 也可以通过手动设置来允许前一部分的存在；而从上面介绍的规则可以知道，后一部分则是无论如何设置都不可避免的。</p>
 <p>嵌套 Trap 则是指处理一个 Trap 过程中又再次发生 Trap ，嵌套中断算是嵌套 Trap 的一种。</p>
 </div>
-</div>
-<div class="section" id="id3">
-<h2>抢占式调度<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h2>
-<p>有了时钟中断和计时器，抢占式调度就很容易实现了：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/trap/mod.rs</span>
-
-<span class="k">match</span><span class="w"> </span><span class="n">scause</span><span class="p">.</span><span class="n">cause</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">Trap</span>::<span class="n">Interrupt</span><span class="p">(</span><span class="n">Interrupt</span>::<span class="n">SupervisorTimer</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">set_next_trigger</span><span class="p">();</span><span class="w"></span>
-<span class="w">        </span><span class="n">suspend_current_and_run_next</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>我们只需在 <code class="docutils literal notranslate"><span class="pre">trap_handler</span></code> 函数下新增一个分支，触发了 S 特权级时钟中断时，重新设置计时器，
-调用 <code class="docutils literal notranslate"><span class="pre">suspend_current_and_run_next</span></code> 函数暂停当前应用并切换到下一个。</p>
-<p>为了避免 S 特权级时钟中断被屏蔽，我们需要在执行第一个应用前调用 <code class="docutils literal notranslate"><span class="pre">enable_timer_interrupt()</span></code> 设置 <code class="docutils literal notranslate"><span class="pre">sie.stie</span></code>，
-使得 S 特权级时钟中断不会被屏蔽；再设置第一个 10ms 的计时器。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// os/src/main.rs</span>
-<span class="linenos"> 2</span>
-<span class="linenos"> 3</span><span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="linenos"> 4</span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 5</span><span class="w">    </span><span class="c1">// ...</span>
-<span class="linenos"> 6</span><span class="w">    </span><span class="n">trap</span>::<span class="n">enable_timer_interrupt</span><span class="p">();</span><span class="w"></span>
-<span class="linenos"> 7</span><span class="w">    </span><span class="n">timer</span>::<span class="n">set_next_trigger</span><span class="p">();</span><span class="w"></span>
-<span class="linenos"> 8</span><span class="w">    </span><span class="c1">// ...</span>
-<span class="linenos"> 9</span><span class="p">}</span><span class="w"></span>
-<span class="linenos">10</span>
-<span class="linenos">11</span><span class="c1">// os/src/trap/mod.rs</span>
-<span class="linenos">12</span>
-<span class="linenos">13</span><span class="k">use</span><span class="w"> </span><span class="n">riscv</span>::<span class="n">register</span>::<span class="n">sie</span><span class="p">;</span><span class="w"></span>
-<span class="linenos">14</span>
-<span class="linenos">15</span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">enable_timer_interrupt</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">16</span><span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">sie</span>::<span class="n">set_stimer</span><span class="p">();</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
-<span class="linenos">17</span><span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>就这样，我们实现了时间片轮转任务调度算法。 <code class="docutils literal notranslate"><span class="pre">power</span></code> 系列用户程序可以验证我们取得的成果：这些应用并没有主动 yield，
-内核仍能公平地把时间片分配给它们。</p>
 </div>
 </div>
 
@@ -452,9 +486,10 @@
           <div class="toc-tree">
             <ul>
 <li><a class="reference internal" href="#">分时多任务系统</a><ul>
-<li><a class="reference internal" href="#id2">时钟中断与计时器</a></li>
+<li><a class="reference internal" href="#id2">计时器</a></li>
+<li><a class="reference internal" href="#id3">时钟中断与抢占式调度</a></li>
+<li><a class="reference internal" href="#clock-gettime">clock_gettime 系统调用</a></li>
 <li><a class="reference internal" href="#risc-v">RISC-V 架构中的嵌套中断问题</a></li>
-<li><a class="reference internal" href="#id3">抢占式调度</a></li>
 </ul>
 </li>
 </ul>

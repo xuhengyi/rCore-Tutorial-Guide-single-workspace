@@ -275,6 +275,9 @@
 <div class="section" id="id3">
 <h2>实践体验<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h2>
 <p>在 <code class="docutils literal notranslate"><span class="pre">rCore-Tutorial-in-single-workspace</span></code> 项目中运行本章代码（ <code class="docutils literal notranslate"><span class="pre">DEBUG</span></code> 类型的调试输出过多，建议使用 <code class="docutils literal notranslate"><span class="pre">LOG=INFO</span></code> 过滤输出）：</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nv">LOG</span><span class="o">=</span>INFO cargo qemu --ch <span class="m">3</span>
+</pre></div>
+</div>
 <p>运行后，看到用户程序交替输出信息：</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>[rustsbi] RustSBI version 0.3.1, adapting to RISC-V SBI v1.0.0
 .______       __    __      _______.___________.  _______..______   __

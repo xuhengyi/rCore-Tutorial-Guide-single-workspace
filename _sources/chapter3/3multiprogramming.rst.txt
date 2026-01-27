@@ -29,7 +29,7 @@ yield 系统调用
     /// 功能：应用主动交出 CPU 所有权并切换到其他应用。
     /// 返回值：总是返回 0。
     /// syscall ID：124
-    fn sys_sched_yield() -> isize;
+    fn sched_yield() -> isize;
 
 用户库对应的实现和封装：
 
