@@ -10,19 +10,66 @@
 裸机启动过程
 ----------------------------
 
-用 QEMU 软件 ``qemu-system-riscv64`` 来模拟 RISC-V 64 计算机。加载内核程序的命令如下：
+用 QEMU 的系统态模拟器 ``qemu-system-riscv64`` 来模拟一台 RISC-V 64 计算机。
+
+在课程代码中，推荐直接用：
+
+.. code-block:: console
+
+   $ cd rCore-Tutorial-in-single-workspace
+   $ cargo qemu --ch 1
+
+这条命令会先编译 ``ch1``，再启动 ``qemu-system-riscv64``。为了不让你一开始就被一长串参数吓到，
+我们先给出**运行结果**（能看到 ``Hello, world!``），再回过头解释它背后发生了什么。
+
+从 ``cargo qemu`` 到 QEMU 命令
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+课程代码在 ``.cargo/config.toml`` 中把 ``cargo qemu`` 配置成一个别名：
+
+.. code-block:: toml
+
+   # rCore-Tutorial-in-single-workspace/.cargo/config.toml（节选）
+   [alias]
+   qemu = "xtask qemu"
+
+也就是说，``cargo qemu --ch 1`` 实际会运行 ``xtask`` 包里的 ``qemu`` 子命令。
+在 ``xtask/src/main.rs`` 中可以看到它如何拼出 QEMU 启动参数（节选）：
+
+.. code-block:: rust
+
+   // rCore-Tutorial-in-single-workspace/xtask/src/main.rs（节选）
+   let mut qemu = Qemu::system(self.build.arch.qemu_system());
+   qemu.args(&["-machine", "virt"])
+       .arg("-nographic");
+
+   if self.build.nobios {
+       qemu.args(&["-bios", "none"]);
+   } else {
+       qemu.arg("-bios").arg(PROJECT.join("rustsbi-qemu.bin"));
+   }
+
+   qemu.arg("-kernel")
+       .arg(objcopy(elf, true))
+       .args(&["-smp", &self.smp.unwrap_or(1).to_string()])
+       .args(&["-m", "64M"])
+       .args(&["-serial", "mon:stdio"]);
+
+因此，对本章默认的 SBI 模式来说，它等价于运行一条形如下面的 QEMU 命令（这里把路径简化成变量）：
 
 .. code-block:: bash
 
     qemu-system-riscv64 \
 		-machine virt \
 		-nographic \
-		-bios $(BOOTLOADER) \
-		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA)
+		-bios $(RUSTSBI_BIN) \
+		-kernel $(KERNEL_BIN) \
+		-smp 1 -m 64M \
+		-serial mon:stdio
 
 
--  ``-bios $(BOOTLOADER)`` 意味着硬件加载了一个 BootLoader 程序，即 RustSBI
--  ``-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA)`` 表示硬件内存中的特定位置 ``$(KERNEL_ENTRY_PA)`` 放置了操作系统的二进制代码 ``$(KERNEL_BIN)`` 。 ``$(KERNEL_ENTRY_PA)`` 的值是 ``0x80200000`` 。
+-  ``-bios $(RUSTSBI_BIN)``：加载 RustSBI（M 态固件）
+-  ``-kernel $(KERNEL_BIN)``：加载内核二进制；在 ``virt`` 机器上默认会放到 ``0x8020_0000`` 附近（与本章链接脚本一致）
 
 当我们执行包含上述启动参数的 qemu-system-riscv64 软件，就意味给这台虚拟的 RISC-V64 计算机加电了。
 此时，CPU 的其它通用寄存器清零，而 PC 会指向 ``0x1000`` 的位置，这里有固化在硬件中的一小段引导代码，
@@ -41,281 +88,148 @@ RustSBI完成硬件初始化后，会跳转到 ``$(KERNEL_BIN)`` 所在内存位
   操作系统内核与 RustSBI 的关系有点像应用与操作系统内核的关系，后者向前者提供一定的服务。只是SBI提供的服务很少，
   比如关机，显示字符串等。
 
-实现关机功能
-----------------------------
+实现裸机版 Hello, world!
+------------------------------------------------
 
-对上一节实现的代码稍作调整，通过 ``ecall`` 调用 RustSBI 实现关机功能：
+先跑起来：你会看到什么输出
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. _term-llvm-sbicall:
+执行 ``cargo qemu --ch 1`` 后，你会看到两部分输出：
+
+- RustSBI 的启动信息（版本/平台/内存布局/内核入口地址等）
+- ``Hello, world!``（来自 ``ch1`` 内核）
+
+可以先抓住两条关键信息：
+
+- RustSBI 打印的 ``Supervisor Address : 0x80200000``：这就是它将要跳转执行内核入口的位置；
+- 我们的链接脚本也把 ``.text`` 放到了 ``0x8020_0000``：二者必须一致，否则就会“跳错地方”。
+
+ch1 的关键文件
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+- ``rCore-Tutorial-in-single-workspace/ch1/src/main.rs``：S 态入口 ``_start``、设栈、``rust_main``；
+- ``rCore-Tutorial-in-single-workspace/ch1/src/sbi.rs``：SBI 调用封装（通过 ``ecall``）；
+- ``rCore-Tutorial-in-single-workspace/ch1/build.rs``：**生成链接脚本** 并传给链接器；
+- （可选）``--nobios``：会额外引入 ``m_entry_rv64.asm`` / ``msbi.rs`` 来完成 M→S 切换与最小 SBI。
+
+SBI 调用：输出与关机
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+在用户态时，我们用 ``ecall`` 调 Linux 系统调用；到了裸机 S 态，我们仍然用 ``ecall``，
+但这次它会进入 RustSBI（M 态）并触发 **SBI 调用**。
+
+课程代码在 ``ch1/src/sbi.rs`` 中实现了两个最小能力：
+
+- ``console_putchar``：输出一个字符；
+- ``shutdown``：关机（优先尝试 SRST 扩展，失败则回退到 legacy shutdown）。
+
 
 .. code-block:: rust
 
-    // bootloader/rustsbi-qemu.bin 直接添加的SBI规范实现的二进制代码，给操作系统提供基本支持服务
-
-    // os/src/sbi.rs
-    fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
-     let mut ret;
-      unsafe {
-          core::arch::asm!(
-              "ecall",
-    ...
-
-    const SBI_SHUTDOWN: usize = 8;
-
-    pub fn shutdown() -> ! {
-        sbi_call(SBI_SHUTDOWN, 0, 0, 0);
-        panic!("It should shutdown!");
-    }
-
-    // os/src/main.rs
-    #[no_mangle]
-    extern "C" fn _start() {
-        shutdown();
-    }
-
-
-应用程序访问操作系统提供的系统调用的指令是 ``ecall`` ，操作系统访问
-RustSBI提供的SBI调用的指令也是 ``ecall`` ，
-虽然指令一样，但它们所在的特权级是不一样的。
-简单地说，应用程序位于最弱的用户特权级（User Mode），
-操作系统位于内核特权级（Supervisor Mode），
-RustSBI位于机器特权级（Machine Mode）。
-下一章会进一步阐释具体细节。
-
-编译执行，结果如下：
-
-.. code-block:: bash
-
-  # 编译生成ELF格式的执行文件
-  $ cargo build --release
-   Compiling os v0.1.0 (/media/chyyuu/ca8c7ba6-51b7-41fc-8430-e29e31e5328f/thecode/rust/os_kernel_lab/os)
-    Finished release [optimized] target(s) in 0.15s
-  # 把ELF执行文件转成bianary文件
-  $ rust-objcopy --binary-architecture=riscv64 target/riscv64gc-unknown-none-elf/release/os --strip-all -O binary target/riscv64gc-unknown-none-elf/release/os.bin
-
-  # 加载运行
-  $ qemu-system-riscv64 -machine virt -nographic -bios ../bootloader/rustsbi-qemu.bin -device loader,file=target/riscv64gc-unknown-none-elf/release/os.bin,addr=0x80200000
-  # 无法退出，风扇狂转，感觉碰到死循环
-
-问题在哪？通过 rust-readobj 分析 ``os`` 可执行程序，发现其入口地址不是
-RustSBI 约定的 ``0x80200000`` 。我们需要修改程序的内存布局并设置好栈空间。
-
-
-设置正确的程序内存布局
-----------------------------
-
-可以通过 **链接脚本** (Linker Script) 调整链接器的行为，使得最终生成的可执行文件的内存布局符合我们的预期。
-
-修改 Cargo 的配置文件来使用我们自己的链接脚本 ``os/src/linker.ld``：
-
-.. code-block::
-    :linenos:
-    :emphasize-lines: 5,6,7,8
-
-    // os/.cargo/config
-    [build]
-    target = "riscv64gc-unknown-none-elf"
-
-    [target.riscv64gc-unknown-none-elf]
-    rustflags = [
-        "-Clink-arg=-Tsrc/linker.ld", "-Cforce-frame-pointers=yes"
-    ]
-
-具体的链接脚本 ``os/src/linker.ld`` 如下：
-
-.. code-block::
-    :linenos:
-
-    OUTPUT_ARCH(riscv)
-    ENTRY(_start)
-    BASE_ADDRESS = 0x80200000;
-
-    SECTIONS
-    {
-        . = BASE_ADDRESS;
-        skernel = .;
-
-        stext = .;
-        .text : {
-            *(.text.entry)
-            *(.text .text.*)
-        }
-
-        . = ALIGN(4K);
-        etext = .;
-        srodata = .;
-        .rodata : {
-            *(.rodata .rodata.*)
-        }
-
-        . = ALIGN(4K);
-        erodata = .;
-        sdata = .;
-        .data : {
-            *(.data .data.*)
-        }
-
-        . = ALIGN(4K);
-        edata = .;
-        .bss : {
-            *(.bss.stack)
-            sbss = .;
-            *(.bss .bss.*)
-        }
-
-        . = ALIGN(4K);
-        ebss = .;
-        ekernel = .;
-
-        /DISCARD/ : {
-            *(.eh_frame)
-        }
-    }
-
-第 1 行我们设置了目标平台为 riscv ；第 2 行我们设置了整个程序的入口点为之前定义的全局符号 ``_start``；
-第 3 行定义了一个常量 ``BASE_ADDRESS`` 为 ``0x80200000`` ，RustSBI 期望的 OS 起始地址；
-
-.. attention::
-
-    linker 脚本的语法不做要求，感兴趣的同学可以自行查阅相关资料。
-
-从 ``BASE_ADDRESS`` 开始，代码段 ``.text``, 只读数据段 ``.rodata``，数据段 ``.data``, bss 段 ``.bss`` 由低到高依次放置，
-且每个段都有两个全局变量给出其起始和结束地址（比如 ``.text`` 段的开始和结束地址分别是 ``stext`` 和 ``etext`` ）。
-
-
-正确配置栈空间布局
-----------------------------
-
-用另一段汇编代码初始化栈空间：
-
-.. code-block:: asm
-    :linenos:
-
-    # os/src/entry.asm
-        .section .text.entry
-        .globl _start
-    _start:
-        la sp, boot_stack_top
-        call rust_main
-
-        .section .bss.stack
-        .globl boot_stack
-    boot_stack:
-        .space 4096 * 16
-        .globl boot_stack_top
-    boot_stack_top:
-
-在第 8 行，我们预留了一块大小为 4096 * 16 字节，也就是 :math:`64\text{KiB}` 的空间，
-用作操作系统的栈空间。
-栈顶地址被全局符号 ``boot_stack_top`` 标识，栈底则被全局符号 ``boot_stack`` 标识。
-同时，这块栈空间被命名为
-``.bss.stack`` ，链接脚本里有它的位置。
-
-``_start`` 作为操作系统的入口地址，将依据链接脚本被放在 ``BASE_ADDRESS`` 处。
-``la sp, boot_stack_top`` 作为 OS 的第一条指令，
-将 sp 设置为栈空间的栈顶。
-简单起见，我们目前不考虑 sp 越过栈底 ``boot_stack`` ，也就是栈溢出的情形。
-第二条指令则是函数调用 ``rust_main`` ，这里的 ``rust_main`` 是我们稍后自己编写的应用入口。
-
-接着，我们在 ``main.rs`` 中嵌入这些汇编代码并声明应用入口 ``rust_main`` ：
-
-.. code-block:: rust
-    :linenos:
-    :emphasize-lines: 7,9,10,11,12
-
-    // os/src/main.rs
-    #![no_std]
-    #![no_main]
-
-    mod lang_items;
-
-    core::arch::global_asm!(include_str!("entry.asm"));
-
-    #[no_mangle]
-    pub fn rust_main() -> ! {
-        shutdown();
-    }
-
-背景高亮指出了 ``main.rs`` 中新增的代码。
-
-第 7 行，我们使用 ``global_asm`` 宏，将同目录下的汇编文件 ``entry.asm`` 嵌入到代码中。
-
-从第 9 行开始，
-我们声明了应用的入口点 ``rust_main`` ，需要注意的是，这里通过宏将 ``rust_main``
-标记为 ``#[no_mangle]`` 以避免编译器对它的名字进行混淆，不然在链接时，
-``entry.asm`` 将找不到 ``main.rs`` 提供的外部符号 ``rust_main``，导致链接失败。
-
-再次使用上节中的编译，生成和运行操作，我们看到QEMU模拟的RISC-V 64计算机 **优雅** 地退出了！
-
-.. code-block:: console
-
-    # 教程使用的 RustSBI 版本比代码框架稍旧，输出有所不同
-    $ qemu-system-riscv64 \
-    > -machine virt \
-    > -nographic \
-    > -bios ../bootloader/rustsbi-qemu.bin \
-    > -device loader,file=target/riscv64gc-unknown-none-elf/release/os.bin,addr=0x80200000
-    [rustsbi] Version 0.1.0
-    .______       __    __      _______.___________.  _______..______   __
-    |   _  \     |  |  |  |    /       |           | /       ||   _  \ |  |
-    |  |_)  |    |  |  |  |   |   (----`---|  |----`|   (----`|  |_)  ||  |
-    |      /     |  |  |  |    \   \       |  |      \   \    |   _  < |  |
-    |  |\  \----.|  `--'  |.----)   |      |  |  .----)   |   |  |_)  ||  |
-    | _| `._____| \______/ |_______/       |__|  |_______/    |______/ |__|
-
-    [rustsbi] Platform: QEMU
-    [rustsbi] misa: RV64ACDFIMSU
-    [rustsbi] mideleg: 0x222
-    [rustsbi] medeleg: 0xb1ab
-    [rustsbi] Kernel entry: 0x80200000
-
-
-清空 .bss 段
-----------------------------------
-
-等一等，与内存相关的部分太容易出错了， **清零 .bss 段** 的工作我们还没有完成。
-
-.. code-block:: rust
-    :linenos:
-
-    // os/src/main.rs
-    fn clear_bss() {
-        extern "C" {
-            fn sbss();
-            fn ebss();
-        }
-        (sbss as usize..ebss as usize).for_each(|a| {
-            unsafe { (a as *mut u8).write_volatile(0) }
-        });
-    }
-
-    pub fn rust_main() -> ! {
-        clear_bss();
-        shutdown();
-    }
-
-链接脚本 ``linker.ld`` 中给出的全局符号 ``sbss`` 和 ``ebss`` 让我们能轻松确定 ``.bss`` 段的位置。
-
-
-添加裸机打印相关函数
-----------------------------------
-
-在上一节中我们为用户态程序实现的 ``println`` 宏，略作修改即可用于本节的内核态操作系统。
-详见 ``os/src/console.rs``。
-
-利用 ``println`` 宏，我们重写异常处理函数 ``panic``，使其在 panic 时能打印错误发生的位置。
-相关代码位于 ``os/src/lang_items.rs`` 中。
-
-我们还使用第三方库 ``log`` 为你实现了日志模块，相关代码位于 ``os/src/logging.rs`` 中。
+   // rCore-Tutorial-in-single-workspace/ch1/src/sbi.rs（节选）
+   asm!(
+       "ecall",
+       inlateout("a0") arg0 => error,
+       inlateout("a1") arg1 => value,
+       in("a2") arg2,
+       in("a6") fid,
+       in("a7") eid,
+   );
+
+它做的事可以概括成一句话：**把参数放进寄存器，然后执行 ``ecall`` 请求 M 态服务**。
+
+
+入口与栈：为什么必须先设 sp
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+在裸机上，启动时**没有任何人替你准备栈**。因此第一件事就是把栈指针 ``sp`` 指到一段你预留的内存。
 
 .. note::
 
-    在 cargo 项目中引入外部库 log，需要修改 ``Cargo.toml`` 加入相应的依赖信息。
+   栈是向低地址增长的。我们把 ``sp`` 设为 ``stack + stack_size``（栈顶，高地址），
+   后续函数调用/入栈会让 ``sp`` 逐步减小。
 
-现在，让我们重复一遍本章开头的试验，``make run LOG=TRACE``！
+课程代码选择在 ``ch1/src/main.rs`` 里用一个 *naked* 入口来完成这件事（省去单独的 ``entry.asm`` 文件）：
 
-.. figure:: color-demo.png
-   :align: center
+.. code-block:: rust
+
+   // rCore-Tutorial-in-single-workspace/ch1/src/main.rs（节选）
+   #[unsafe(naked)]
+   #[no_mangle]
+   #[link_section = ".text.entry"]
+   unsafe extern "C" fn _start() -> ! {
+       const STACK_SIZE: usize = 4096;
+       #[link_section = ".bss.uninit"]
+       static mut STACK: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
+       core::arch::naked_asm!(
+           "la sp, {stack} + {stack_size}",
+           "j  {main}",
+           stack_size = const STACK_SIZE,
+           stack      =   sym STACK,
+           main       =   sym rust_main,
+       )
+   }
+
+链接脚本：由 build.rs 生成并注入
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+让内核“从正确地址开始执行”，离不开链接脚本。课程代码把链接脚本写在 ``build.rs`` 里并在编译时生成，
+从而保证：
+
+- SBI 模式下，内核代码与入口放在 ``0x8020_0000`` 附近；
+- nobios 模式下，M 态入口从 ``0x8000_0000`` 开始，而 S 态内核从 ``0x8020_0000`` 开始。
+
+ ``build.rs`` 中 SBI 模式的链接脚本片段：
+
+.. code-block:: rust
+
+   // rCore-Tutorial-in-single-workspace/ch1/build.rs（节选）
+   // SBI mode: kernel at 0x80200000
+   r#"
+   OUTPUT_ARCH(riscv)
+   SECTIONS {
+       .text 0x80200000 : {
+           *(.text.entry)
+           *(.text .text.*)
+       }
+       .rodata : { *(.rodata .rodata.*) *(.srodata .srodata.*) }
+       .data   : { *(.data   .data.*)   *(.sdata   .sdata.*)   }
+       .bss    : { *(.bss.uninit) *(.bss .bss.*) *(.sbss .sbss.*) }
+   }
+   "#
+
+你可以先把它理解为：把 ``.text`` 放到 ``0x8020_0000``，并确保 ``.text.entry``（也就是 ``_start``）在最前面。
+
+把用户态逻辑“迁移”到裸机
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``rust_main`` 里做的事情和上一节很像：输出字符串，然后退出。
+区别在于：
+
+- **输出**：不再是 ``write`` 系统调用，而是对 ``console_putchar`` 的循环调用；
+- **退出**：不再是 ``exit`` 系统调用，而是 ``sbi::shutdown``。
+
+.. code-block:: rust
+
+   // rCore-Tutorial-in-single-workspace/ch1/src/main.rs（节选）
+   extern "C" fn rust_main() -> ! {
+       for c in b"Hello, world!\\n" {
+           sbi::console_putchar(*c);
+       }
+       sbi::shutdown(false)
+   }
+
+可选：nobios 模式
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+如果使用：
+
+.. code-block:: console
+
+   $ cargo qemu --ch 1 --nobios
+
+则 QEMU 不加载 RustSBI（``-bios none``），而是从 ``0x8000_0000`` 直接启动，
+由课程代码提供的 M 态入口与最小 SBI 实现完成 M→S 的切换与服务。
 
 至此，我们完成了第一章的实验内容，
 
