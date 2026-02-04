@@ -262,188 +262,124 @@
         </div>
         <div class="section" id="term-print-userminienv">
 <span id="id1"></span><h1>构建用户态执行环境<a class="headerlink" href="#term-print-userminienv" title="永久链接至标题">¶</a></h1>
-<div class="admonition note">
-<p class="admonition-title">注解</p>
-<p>前三小节的用户态程序案例代码在 <a class="reference external" href="https://github.com/LearningOS/rCore-Tutorial-Book-2021Autumn/tree/ch2-U-nostd">此处</a> 获取。</p>
-</div>
-<div class="section" id="id3">
-<h2>用户态最小化执行环境<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h2>
-<div class="section" id="id4">
-<h3>执行环境初始化<a class="headerlink" href="#id4" title="永久链接至标题">¶</a></h3>
-<p>首先我们要给 Rust 编译器编译器提供入口函数 <code class="docutils literal notranslate"><span class="pre">_start()</span></code> ，
-在 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 中添加如下内容：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/main.rs</span>
+<div class="section" id="id2">
+<h2>用户态最小化执行环境<a class="headerlink" href="#id2" title="永久链接至标题">¶</a></h2>
+<p>在用户态（Linux / QEMU User-Mode）下，程序的“执行环境”由操作系统提供：加载 ELF、建立用户栈、初始化寄存器等。
+但 <strong>no_std</strong> 程序仍然需要自己补齐一些最基本的东西：</p>
+<ul class="simple">
+<li><p><strong>入口</strong>：从哪里开始执行（<code class="docutils literal notranslate"><span class="pre">_start</span></code>）</p></li>
+<li><p><strong>退出</strong>：怎么正常结束（<code class="docutils literal notranslate"><span class="pre">exit</span></code> 系统调用）</p></li>
+<li><p><strong>输出</strong>：怎么把字符写到终端（<code class="docutils literal notranslate"><span class="pre">write</span></code> 系统调用）</p></li>
+</ul>
+<div class="section" id="start">
+<h3>入口：<code class="docutils literal notranslate"><span class="pre">_start</span></code> 做了什么<a class="headerlink" href="#start" title="永久链接至标题">¶</a></h3>
+<p>用户态程序不能依赖 <code class="docutils literal notranslate"><span class="pre">std</span></code> 提供的启动流程，因此课程代码为用户程序提供了一个统一入口 <code class="docutils literal notranslate"><span class="pre">_start</span></code>：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/user/src/lib.rs（节选）</span>
 <span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span> <span class="nf">_start</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">loop</span><span class="p">{};</span><span class="w"></span>
+<span class="cp">#[link_section = </span><span class="s">".text.entry"</span><span class="cp">]</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span> <span class="nf">_start</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// 初始化输出与日志</span>
+<span class="w">    </span><span class="n">rcore_console</span>::<span class="n">init_console</span><span class="p">(</span><span class="o">&amp;</span><span class="n">Console</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="n">rcore_console</span>::<span class="n">set_log_level</span><span class="p">(</span><span class="fm">option_env!</span><span class="p">(</span><span class="s">"LOG"</span><span class="p">));</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// 初始化堆（供 alloc 使用）</span>
+<span class="w">    </span><span class="n">heap</span>::<span class="n">init</span><span class="p">();</span><span class="w"></span>
+
+<span class="w">    </span><span class="c1">// 约定：用户程序提供 main()，返回 i32 作为退出码</span>
+<span class="w">    </span><span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="kt">i32</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="n">exit</span><span class="p">(</span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">main</span><span class="p">()</span><span class="w"> </span><span class="p">});</span><span class="w"></span>
+<span class="w">    </span><span class="fm">unreachable!</span><span class="p">()</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>对上述代码重新编译，再用分析工具分析：</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>cargo build
-<span class="go">   Compiling os v0.1.0 (/home/shinbokuow/workspace/v3/rCore-Tutorial-v3/os)</span>
-<span class="go">    Finished dev [unoptimized + debuginfo] target(s) in 0.06s</span>
+<p>你可以把它理解为用户态“最小运行时”的骨架：把控制权从 <code class="docutils literal notranslate"><span class="pre">_start</span></code> 交给用户程序 <code class="docutils literal notranslate"><span class="pre">main</span></code>，
+再把 <code class="docutils literal notranslate"><span class="pre">main</span></code> 的返回值交给 <code class="docutils literal notranslate"><span class="pre">exit</span></code> 系统调用，保证程序能**正常退出**，而不是“ret 掉以后崩溃”。</p>
+</div>
+<div class="section" id="ecall">
+<h3>系统调用：把 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> 封装成函数<a class="headerlink" href="#ecall" title="永久链接至标题">¶</a></h3>
+<p>课程代码把 Linux 风格的系统调用封装在 <code class="docutils literal notranslate"><span class="pre">syscall</span></code> 模块中。以 <code class="docutils literal notranslate"><span class="pre">write</span></code> 与 <code class="docutils literal notranslate"><span class="pre">exit</span></code> 为例：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/syscall/src/user.rs（节选）</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">write</span><span class="p">(</span><span class="n">fd</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span>: <span class="kp">&amp;</span><span class="p">[</span><span class="kt">u8</span><span class="p">])</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">syscall3</span><span class="p">(</span><span class="n">SyscallId</span>::<span class="n">WRITE</span><span class="p">,</span><span class="w"> </span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">as_ptr</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">len</span><span class="p">())</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
 
-<span class="go">[反汇编导出汇编程序]</span>
-<span class="gp">$ </span>rust-objdump -S target/riscv64gc-unknown-none-elf/debug/os
-<span class="go">   target/riscv64gc-unknown-none-elf/debug/os:       file format elf64-littleriscv</span>
-
-<span class="go">   Disassembly of section .text:</span>
-
-<span class="go">   0000000000011120 &lt;_start&gt;:</span>
-<span class="go">   ;     loop {}</span>
-<span class="go">     11120: 09 a0            j       2 &lt;_start+0x2&gt;</span>
-<span class="go">     11122: 01 a0            j       0 &lt;_start+0x2&gt;</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">exit</span><span class="p">(</span><span class="n">exit_code</span>: <span class="kt">i32</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">syscall1</span><span class="p">(</span><span class="n">SyscallId</span>::<span class="n">EXIT</span><span class="p">,</span><span class="w"> </span><span class="n">exit_code</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">_</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>反汇编出的两条指令就是一个死循环，
-这说明编译器生成的已经是一个合理的程序了。
-用 <code class="docutils literal notranslate"><span class="pre">qemu-riscv64</span> <span class="pre">target/riscv64gc-unknown-none-elf/debug/os</span></code> 命令可以执行这个程序。</p>
-</div>
-<div class="section" id="id5">
-<h3>程序正常退出<a class="headerlink" href="#id5" title="永久链接至标题">¶</a></h3>
-<p>我们把 <code class="docutils literal notranslate"><span class="pre">_start()</span></code> 函数中的循环语句注释掉，重新编译并分析，看到其汇编代码是：</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>rust-objdump -S target/riscv64gc-unknown-none-elf/debug/os
+<p>进一步往下，你会看到最底层的 <code class="docutils literal notranslate"><span class="pre">native::syscallN</span></code> 用内联汇编发出 <code class="docutils literal notranslate"><span class="pre">ecall</span></code>：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/syscall/src/user.rs（节选）</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">mod</span> <span class="nn">native</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="k">crate</span>::<span class="n">SyscallId</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="k">use</span><span class="w"> </span><span class="n">core</span>::<span class="n">arch</span>::<span class="n">asm</span><span class="p">;</span><span class="w"></span>
 
-<span class="go"> target/riscv64gc-unknown-none-elf/debug/os: file format elf64-littleriscv</span>
-
-
-<span class="go"> Disassembly of section .text:</span>
-
-<span class="go"> 0000000000011120 &lt;_start&gt;:</span>
-<span class="go"> ; }</span>
-<span class="go">   11120: 82 80              ret</span>
-</pre></div>
-</div>
-<p>看起来是合法的执行程序。但如果我们执行它，会引发问题：</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>qemu-riscv64 target/riscv64gc-unknown-none-elf/debug/os
-<span class="go">  段错误 (核心已转储)</span>
-</pre></div>
-</div>
-<p>这个简单的程序导致 <code class="docutils literal notranslate"><span class="pre">qemu-riscv64</span></code> 崩溃了！为什么会这样？</p>
-<div class="admonition note">
-<p class="admonition-title">注解</p>
-<p>QEMU有两种运行模式：</p>
-<p><code class="docutils literal notranslate"><span class="pre">User</span> <span class="pre">mode</span></code> 模式，即用户态模拟，如 <code class="docutils literal notranslate"><span class="pre">qemu-riscv64</span></code> 程序，
-能够模拟不同处理器的用户态指令的执行，并可以直接解析ELF可执行文件，
-加载运行那些为不同处理器编译的用户级Linux应用程序。</p>
-<p><code class="docutils literal notranslate"><span class="pre">System</span> <span class="pre">mode</span></code> 模式，即系统态模式，如 <code class="docutils literal notranslate"><span class="pre">qemu-system-riscv64</span></code> 程序，
-能够模拟一个完整的基于不同CPU的硬件系统，包括处理器、内存及其他外部设备，支持运行完整的操作系统。</p>
-</div>
-<p>目前的执行环境还缺了一个退出机制，我们需要操作系统提供的 <code class="docutils literal notranslate"><span class="pre">exit</span></code> 系统调用来退出程序。这里先给出代码：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// os/src/main.rs</span>
-
-<span class="k">const</span><span class="w"> </span><span class="n">SYSCALL_EXIT</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mi">93</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">fn</span> <span class="nf">syscall</span><span class="p">(</span><span class="n">id</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">args</span>: <span class="p">[</span><span class="kt">usize</span><span class="p">;</span><span class="w"> </span><span class="mi">3</span><span class="p">])</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">ret</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">core</span>::<span class="n">arch</span>::<span class="fm">asm!</span><span class="p">(</span><span class="w"></span>
-<span class="w">            </span><span class="s">"ecall"</span><span class="p">,</span><span class="w"></span>
-<span class="w">            </span><span class="n">inlateout</span><span class="p">(</span><span class="s">"x10"</span><span class="p">)</span><span class="w"> </span><span class="n">args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">ret</span><span class="p">,</span><span class="w"></span>
-<span class="w">            </span><span class="k">in</span><span class="p">(</span><span class="s">"x11"</span><span class="p">)</span><span class="w"> </span><span class="n">args</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"></span>
-<span class="w">            </span><span class="k">in</span><span class="p">(</span><span class="s">"x12"</span><span class="p">)</span><span class="w"> </span><span class="n">args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span><span class="w"></span>
-<span class="w">            </span><span class="k">in</span><span class="p">(</span><span class="s">"x17"</span><span class="p">)</span><span class="w"> </span><span class="n">id</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">unsafe</span><span class="w"> </span><span class="k">fn</span> <span class="nf">syscall1</span><span class="p">(</span><span class="n">id</span>: <span class="nc">SyscallId</span><span class="p">,</span><span class="w"> </span><span class="n">a0</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">ret</span>: <span class="kt">isize</span><span class="p">;</span><span class="w"></span>
+<span class="w">        </span><span class="fm">asm!</span><span class="p">(</span><span class="s">"ecall"</span><span class="p">,</span><span class="w"></span>
+<span class="w">            </span><span class="n">inlateout</span><span class="p">(</span><span class="s">"a0"</span><span class="p">)</span><span class="w"> </span><span class="n">a0</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">ret</span><span class="p">,</span><span class="w"></span>
+<span class="w">            </span><span class="k">in</span><span class="p">(</span><span class="s">"a7"</span><span class="p">)</span><span class="w"> </span><span class="n">id</span><span class="p">.</span><span class="mi">0</span><span class="p">,</span><span class="w"></span>
 <span class="w">        </span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="w">    </span><span class="n">ret</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">sys_exit</span><span class="p">(</span><span class="n">xstate</span>: <span class="kt">i32</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">syscall</span><span class="p">(</span><span class="n">SYSCALL_EXIT</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="n">xstate</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">])</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-
-<span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span> <span class="nf">_start</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">sys_exit</span><span class="p">(</span><span class="mi">9</span><span class="p">);</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p><code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 增加的内容不多，但还是有点与一般的应用程序有所不同，因为它引入了汇编和系统调用。
-第二章的第二节 <a class="reference internal" href="../chapter2/2application.html"><span class="doc">实现应用程序</span></a> 会详细介绍上述代码的含义。
-这里读者只需要知道 <code class="docutils literal notranslate"><span class="pre">_start</span></code> 函数调用了一个 <code class="docutils literal notranslate"><span class="pre">sys_exit</span></code> 函数，
-向操作系统发出了退出的系统调用请求，退出码为 <code class="docutils literal notranslate"><span class="pre">9</span></code> 。</p>
-<p>我们编译执行以下修改后的程序：</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>cargo build --target riscv64gc-unknown-none-elf
-<span class="go">  Compiling os v0.1.0 (/media/chyyuu/ca8c7ba6-51b7-41fc-8430-e29e31e5328f/thecode/rust/os_kernel_lab/os)</span>
-<span class="go">    Finished dev [unoptimized + debuginfo] target(s) in 0.26s</span>
-
-<span class="go">[打印程序的返回值]</span>
-<span class="gp">$ </span>qemu-riscv64 target/riscv64gc-unknown-none-elf/debug/os<span class="p">;</span> <span class="nb">echo</span> <span class="nv">$?</span>
-<span class="go">9</span>
-</pre></div>
-</div>
-<p>可以看到，返回的结果确实是 <code class="docutils literal notranslate"><span class="pre">9</span></code> 。这样，我们勉强完成了一个简陋的用户态最小化执行环境。</p>
-</div>
-</div>
-<div class="section" id="id6">
-<h2>有显示支持的用户态执行环境<a class="headerlink" href="#id6" title="永久链接至标题">¶</a></h2>
-<p>没有 <code class="docutils literal notranslate"><span class="pre">println</span></code> 输出信息，终究觉得缺了点啥。</p>
-<p>Rust 的 core 库内建了以一系列帮助实现显示字符的基本 Trait 和数据结构，函数等，我们可以对其中的关键部分进行扩展，就可以实现定制的 <code class="docutils literal notranslate"><span class="pre">println!</span></code> 功能。</p>
-<div class="section" id="id7">
-<h3>实现输出字符串的相关函数<a class="headerlink" href="#id7" title="永久链接至标题">¶</a></h3>
-<div class="admonition attention">
-<p class="admonition-title">注意</p>
-<p>如果你觉得理解 Rust 宏有困难，把它当成黑盒就好！</p>
-</div>
-<p>首先封装一下对 <code class="docutils literal notranslate"><span class="pre">SYSCALL_WRITE</span></code> 系统调用。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="k">const</span><span class="w"> </span><span class="n">SYSCALL_WRITE</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mi">64</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">sys_write</span><span class="p">(</span><span class="n">fd</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span>: <span class="kp">&amp;</span><span class="p">[</span><span class="kt">u8</span><span class="p">])</span><span class="w"> </span>-&gt; <span class="kt">isize</span> <span class="p">{</span><span class="w"></span>
-<span class="w">  </span><span class="n">syscall</span><span class="p">(</span><span class="n">SYSCALL_WRITE</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="n">fd</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">as_ptr</span><span class="p">()</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">buffer</span><span class="p">.</span><span class="n">len</span><span class="p">()])</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>然后实现基于 <code class="docutils literal notranslate"><span class="pre">Write</span></code> Trait 的数据结构，并完成 <code class="docutils literal notranslate"><span class="pre">Write</span></code> Trait 所需要的  <code class="docutils literal notranslate"><span class="pre">write_str</span></code> 函数，并用 <code class="docutils literal notranslate"><span class="pre">print</span></code> 函数进行包装。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span> <span class="nc">Stdout</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">impl</span><span class="w"> </span><span class="n">Write</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">Stdout</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">fn</span> <span class="nf">write_str</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">s</span>: <span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="nc">fmt</span>::<span class="nb">Result</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">sys_write</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">as_bytes</span><span class="p">());</span><span class="w"></span>
-<span class="w">        </span><span class="nb">Ok</span><span class="p">(())</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">print</span><span class="p">(</span><span class="n">args</span>: <span class="nc">fmt</span>::<span class="n">Arguments</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">Stdout</span><span class="p">.</span><span class="n">write_fmt</span><span class="p">(</span><span class="n">args</span><span class="p">).</span><span class="n">unwrap</span><span class="p">();</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>最后，实现基于 <code class="docutils literal notranslate"><span class="pre">print</span></code> 函数，实现Rust语言 <strong>格式化宏</strong> ( <a class="reference external" href="https://doc.rust-lang.org/std/fmt/#related-macros">formatting macros</a> )。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="cp">#[macro_export]</span><span class="w"></span>
-<span class="fm">macro_rules!</span><span class="w"> </span><span class="n">print</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="p">(</span><span class="cp">$fmt</span>: <span class="nc">literal</span><span class="w"> </span><span class="cp">$(,</span><span class="w"> </span><span class="cp">$($arg</span>: <span class="nc">tt</span><span class="p">)</span><span class="o">+</span><span class="p">)</span><span class="o">?</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="cp">$crate</span>::<span class="n">console</span>::<span class="n">print</span><span class="p">(</span><span class="fm">format_args!</span><span class="p">(</span><span class="cp">$fmt</span><span class="w"> </span><span class="cp">$(,</span><span class="w"> </span><span class="cp">$($arg</span><span class="p">)</span><span class="o">+</span><span class="p">)</span><span class="o">?</span><span class="p">));</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-
-<span class="cp">#[macro_export]</span><span class="w"></span>
-<span class="fm">macro_rules!</span><span class="w"> </span><span class="n">println</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="p">(</span><span class="cp">$fmt</span>: <span class="nc">literal</span><span class="w"> </span><span class="cp">$(,</span><span class="w"> </span><span class="cp">$($arg</span>: <span class="nc">tt</span><span class="p">)</span><span class="o">+</span><span class="p">)</span><span class="o">?</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">print</span><span class="p">(</span><span class="fm">format_args!</span><span class="p">(</span><span class="fm">concat!</span><span class="p">(</span><span class="cp">$fmt</span><span class="p">,</span><span class="w"> </span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">)</span><span class="w"> </span><span class="cp">$(,</span><span class="w"> </span><span class="cp">$($arg</span><span class="p">)</span><span class="o">+</span><span class="p">)</span><span class="o">?</span><span class="p">));</span><span class="w"></span>
+<span class="w">        </span><span class="n">ret</span><span class="w"></span>
 <span class="w">    </span><span class="p">}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>接下来，我们调整一下应用程序，让它发出显示字符串和退出的请求：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span> <span class="nf">_start</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">"Hello, world!"</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="n">sys_exit</span><span class="p">(</span><span class="mi">9</span><span class="p">);</span><span class="w"></span>
+</div>
+<div class="section" id="console-write">
+<h3>输出：把 Console 绑定到 <code class="docutils literal notranslate"><span class="pre">write</span></code><a class="headerlink" href="#console-write" title="永久链接至标题">¶</a></h3>
+<p>用户库通过实现 <code class="docutils literal notranslate"><span class="pre">rcore_console::Console</span></code> trait，把“输出一个字符/字符串”的抽象落到 <code class="docutils literal notranslate"><span class="pre">write</span></code> 系统调用上：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/user/src/lib.rs（节选）</span>
+<span class="k">struct</span> <span class="nc">Console</span><span class="p">;</span><span class="w"></span>
+
+<span class="k">impl</span><span class="w"> </span><span class="n">rcore_console</span>::<span class="n">Console</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">Console</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">fn</span> <span class="nf">put_char</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">c</span>: <span class="kt">u8</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">syscall</span>::<span class="n">write</span><span class="p">(</span><span class="n">STDOUT</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="p">[</span><span class="n">c</span><span class="p">]);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+
+<span class="w">    </span><span class="k">fn</span> <span class="nf">put_str</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">s</span>: <span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">syscall</span>::<span class="n">write</span><span class="p">(</span><span class="n">STDOUT</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">as_bytes</span><span class="p">());</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
 <span class="p">}</span><span class="w"></span>
 </pre></div>
 </div>
-<p>现在，我们编译并执行一下，可以看到正确的字符串输出，且程序也能正确退出！</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>cargo build --target riscv64gc-unknown-none-elf
-<span class="go">   Compiling os v0.1.0 (/media/chyyuu/ca8c7ba6-51b7-41fc-8430-e29e31e5328f/thecode/rust/os_kernel_lab/os)</span>
-<span class="go">  Finished dev [unoptimized + debuginfo] target(s) in 0.61s</span>
-
-<span class="gp">$ </span>qemu-riscv64 target/riscv64gc-unknown-none-elf/debug/os<span class="p">;</span> <span class="nb">echo</span> <span class="nv">$?</span>
-<span class="go">  Hello, world!</span>
-<span class="go">  9</span>
+<p>这样，用户程序就可以使用用户库导出的 <code class="docutils literal notranslate"><span class="pre">print/println``（见</span> <span class="pre">``user/src/lib.rs</span></code> 顶部的 <code class="docutils literal notranslate"><span class="pre">pub</span> <span class="pre">use</span></code>），
+而无需自己反复处理 <code class="docutils literal notranslate"><span class="pre">write</span></code> 的细节。</p>
+<p>你也可以直接在用户库里看到它把 <code class="docutils literal notranslate"><span class="pre">println</span></code> 暴露给用户程序：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/user/src/lib.rs（节选）</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">use</span><span class="w"> </span><span class="n">rcore_console</span>::<span class="p">{</span><span class="n">print</span><span class="p">,</span><span class="w"> </span><span class="n">println</span><span class="p">};</span><span class="w"></span>
+<span class="k">pub</span><span class="w"> </span><span class="k">use</span><span class="w"> </span><span class="n">syscall</span>::<span class="o">*</span><span class="p">;</span><span class="w"></span>
 </pre></div>
 </div>
-<span class="target" id="start"></span></div>
+</div>
+<div class="section" id="qemu-user-mode">
+<h3>动手运行：用 QEMU User-Mode 执行用户程序<a class="headerlink" href="#qemu-user-mode" title="永久链接至标题">¶</a></h3>
+<p>代码框架在 <code class="docutils literal notranslate"><span class="pre">user/src/bin</span></code> 下提供了一组示例用户程序，例如 <code class="docutils literal notranslate"><span class="pre">00hello_world.rs</span></code>。
+你可以把它编译成 RISC-V 的可执行文件，并用 <code class="docutils literal notranslate"><span class="pre">qemu-riscv64</span></code> 在当前主机上运行：</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">cd</span> rCore-Tutorial-in-single-workspace
+<span class="gp">$ </span>cargo build -p user_lib --bin 00hello_world --target riscv64gc-unknown-none-elf
+<span class="gp">$ </span>qemu-riscv64 target/riscv64gc-unknown-none-elf/debug/00hello_world<span class="p">;</span> <span class="nb">echo</span> <span class="nv">$?</span>
+<span class="go">Hello, world!</span>
+<span class="go">0</span>
+</pre></div>
+</div>
+<p>其中：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">-p</span> <span class="pre">user_lib</span></code>：选择要编译的包（课程里用户库包名叫 <code class="docutils literal notranslate"><span class="pre">user_lib</span></code>）；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--bin</span> <span class="pre">00hello_world</span></code>：选择要编译的用户程序；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--target</span> <span class="pre">...</span></code>：编译成 RISC-V 的用户态可执行文件。</p></li>
+</ul>
+<div class="admonition tip">
+<p class="admonition-title">小技巧</p>
+<p>读到这里，你应该能回答两个问题：</p>
+<ul class="simple">
+<li><p>用户程序是如何从 <code class="docutils literal notranslate"><span class="pre">_start</span></code> 开始执行并最终 <code class="docutils literal notranslate"><span class="pre">exit</span></code> 的？</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">println!</span></code> 最后为什么会落到 <code class="docutils literal notranslate"><span class="pre">write</span></code> 这个系统调用上？</p></li>
+</ul>
+<p>接下来我们把这个思路迁移到裸机内核：此时 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> 不再进入 Linux，而是进入 SBI。</p>
+</div>
+</div>
 </div>
 </div>
 
@@ -502,13 +438,11 @@
           <div class="toc-tree">
             <ul>
 <li><a class="reference internal" href="#">构建用户态执行环境</a><ul>
-<li><a class="reference internal" href="#id3">用户态最小化执行环境</a><ul>
-<li><a class="reference internal" href="#id4">执行环境初始化</a></li>
-<li><a class="reference internal" href="#id5">程序正常退出</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#id6">有显示支持的用户态执行环境</a><ul>
-<li><a class="reference internal" href="#id7">实现输出字符串的相关函数</a></li>
+<li><a class="reference internal" href="#id2">用户态最小化执行环境</a><ul>
+<li><a class="reference internal" href="#start">入口：<code class="docutils literal notranslate"><span class="pre">_start</span></code> 做了什么</a></li>
+<li><a class="reference internal" href="#ecall">系统调用：把 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> 封装成函数</a></li>
+<li><a class="reference internal" href="#console-write">输出：把 Console 绑定到 <code class="docutils literal notranslate"><span class="pre">write</span></code></a></li>
+<li><a class="reference internal" href="#qemu-user-mode">动手运行：用 QEMU User-Mode 执行用户程序</a></li>
 </ul>
 </li>
 </ul>

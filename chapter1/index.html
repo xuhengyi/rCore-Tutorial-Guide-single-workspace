@@ -266,8 +266,8 @@
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="0intro.html">引言</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="0intro.html#id2">本章导读</a></li>
-<li class="toctree-l2"><a class="reference internal" href="0intro.html#id4">实践体验</a></li>
-<li class="toctree-l2"><a class="reference internal" href="0intro.html#id5">本章代码树</a></li>
+<li class="toctree-l2"><a class="reference internal" href="0intro.html#id3">实践体验</a></li>
+<li class="toctree-l2"><a class="reference internal" href="0intro.html#id4">本章代码树</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="1app-ee-platform.html">应用程序执行环境与平台支持</a><ul>
@@ -278,31 +278,38 @@
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="2remove-std.html">移除标准库依赖</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="2remove-std.html#id2">交叉编译目标</a></li>
 <li class="toctree-l2"><a class="reference internal" href="2remove-std.html#println">移除 println! 宏</a></li>
 <li class="toctree-l2"><a class="reference internal" href="2remove-std.html#panic-handler">提供语义项 panic_handler</a></li>
 <li class="toctree-l2"><a class="reference internal" href="2remove-std.html#main">移除 main 函数</a></li>
-<li class="toctree-l2"><a class="reference internal" href="2remove-std.html#id2">分析被移除标准库的程序</a></li>
+<li class="toctree-l2"><a class="reference internal" href="2remove-std.html#id3">小结：我们“补齐了什么”</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="3mini-rt-usrland.html">构建用户态执行环境</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="3mini-rt-usrland.html#id3">用户态最小化执行环境</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="3mini-rt-usrland.html#id4">执行环境初始化</a></li>
-<li class="toctree-l3"><a class="reference internal" href="3mini-rt-usrland.html#id5">程序正常退出</a></li>
-</ul>
-</li>
-<li class="toctree-l2"><a class="reference internal" href="3mini-rt-usrland.html#id6">有显示支持的用户态执行环境</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="3mini-rt-usrland.html#id7">实现输出字符串的相关函数</a></li>
+<li class="toctree-l2"><a class="reference internal" href="3mini-rt-usrland.html#id2">用户态最小化执行环境</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="3mini-rt-usrland.html#start">入口：<code class="docutils literal notranslate"><span class="pre">_start</span></code> 做了什么</a></li>
+<li class="toctree-l3"><a class="reference internal" href="3mini-rt-usrland.html#ecall">系统调用：把 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> 封装成函数</a></li>
+<li class="toctree-l3"><a class="reference internal" href="3mini-rt-usrland.html#console-write">输出：把 Console 绑定到 <code class="docutils literal notranslate"><span class="pre">write</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="3mini-rt-usrland.html#qemu-user-mode">动手运行：用 QEMU User-Mode 执行用户程序</a></li>
 </ul>
 </li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="4mini-rt-baremetal.html">构建裸机执行环境</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#id2">裸机启动过程</a></li>
-<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#id3">实现关机功能</a></li>
-<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#id4">设置正确的程序内存布局</a></li>
-<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#id5">正确配置栈空间布局</a></li>
-<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#bss">清空 .bss 段</a></li>
-<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#id6">添加裸机打印相关函数</a></li>
+<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#id2">裸机启动过程</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#cargo-qemu-qemu">从 <code class="docutils literal notranslate"><span class="pre">cargo</span> <span class="pre">qemu</span></code> 到 QEMU 命令</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="4mini-rt-baremetal.html#hello-world">实现裸机版 Hello, world!</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#id3">先跑起来：你会看到什么输出</a></li>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#ch1">ch1 的关键文件</a></li>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#sbi">SBI 调用：输出与关机</a></li>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#sp">入口与栈：为什么必须先设 sp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#build-rs">链接脚本：由 build.rs 生成并注入</a></li>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#id4">把用户态逻辑“迁移”到裸机</a></li>
+<li class="toctree-l3"><a class="reference internal" href="4mini-rt-baremetal.html#nobios">可选：nobios 模式</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

@@ -1,153 +1,123 @@
-.. _term-remove-std:
-
 移除标准库依赖
 ==========================
 
-首先在 ``os`` 目录下新建 ``.cargo`` 目录，并在这个目录下创建 ``config`` 文件，输入如下内容：
+本节的目标是：解释为什么课程代码中的 ``os`` 不能依赖 Rust 标准库 ``std``，以及当我们拿掉 ``std`` 之后，
+需要在代码中补齐哪些“最小执行环境”要素。
 
-.. code-block:: toml
+.. note::
 
-   # os/.cargo/config
-   [build]
-   target = "riscv64gc-unknown-none-elf"
+   本章文档中我们把要构建的内核工程统称为 ``os``。在课程提供的代码中，本章对应目录是
+   ``rCore-Tutorial-in-single-workspace/ch1``。
 
+交叉编译目标
+----------------------------------
 
-这将使 cargo 工具在 os 目录下默认会使用 riscv64gc-unknown-none-elf 作为目标平台。
-这种编译器运行的平台（x86_64）与可执行文件运行的目标平台不同的情况，称为 **交叉编译** (Cross Compile)。
+本章的内核运行在 RISC-V 裸机环境，因此编译目标是 ``riscv64gc-unknown-none-elf``。
+
+如果你第一次使用该目标，可能会遇到：
+
+.. code-block:: console
+
+   error: target `riscv64gc-unknown-none-elf` not found
+
+需要先安装 target：
+
+.. code-block:: console
+
+   $ rustup target add riscv64gc-unknown-none-elf
 
 移除 println! 宏
 ----------------------------------
 
+``println!`` 是由 ``std`` 提供的宏；而 ``std`` 依赖操作系统提供的系统调用（例如 ``write``）才能把字符打印到终端。
+当我们把程序移到裸机上时，这些系统调用并不存在，所以内核不能使用 ``std``，也就不能直接使用 ``println!``。
 
-我们在 ``main.rs`` 的开头加上一行 ``#![no_std]``，
-告诉 Rust 编译器不使用 Rust 标准库 std 转而使用核心库 core。重新编译，报错如下：
+在课程代码中，本章内核采用更原始但更清晰的方式输出字符：把字符串逐字节交给 SBI 输出接口：
 
-.. error::
+.. code-block:: rust
 
-   .. code-block:: console
+   // rCore-Tutorial-in-single-workspace/ch1/src/main.rs（节选）
+   #![no_std]
+   #![no_main]
 
-      $ cargo build
-         Compiling os v0.1.0 (/home/shinbokuow/workspace/v3/rCore-Tutorial-v3/os)
-      error: cannot find macro `println` in this scope
-      --> src/main.rs:4:5
-        |
-      4 |     println!("Hello, world!");
-        |     ^^^^^^^
+   mod sbi;
 
-println! 宏是由标准库 std 提供的，且会使用到一个名为 write 的系统调用。
-无论如何，我们先将这行代码注释掉。
+   extern "C" fn rust_main() -> ! {
+       for c in b"Hello, world!\\n" {
+           sbi::console_putchar(*c);
+       }
+       sbi::shutdown(false)
+   }
 
+.. note::
+
+   这里的 ``b"Hello, world!\\n"`` 是一个**字节串**（类型是 ``&[u8]``）。
+   因为我们此时不依赖 ``std``，也不急着引入复杂的格式化输出；逐字节输出能把依赖最小化，也最容易理解。
 
 提供语义项 panic_handler
 ----------------------------------------------------
 
-.. error::
+当我们禁用 ``std`` 之后，编译器会要求你提供 panic 的处理逻辑（``#[panic_handler]``）。
+``std`` 在“有操作系统的环境”里会帮你打印错误信息并退出；但内核态/裸机程序没有这些默认能力，只能由我们自己决定“panic 时做什么”。
 
-   .. code-block:: console
-
-      $ cargo build
-         Compiling os v0.1.0 (/home/shinbokuow/workspace/v3/rCore-Tutorial-v3/os)
-      error: `#[panic_handler]` function required, but not found
-
-标准库 std 提供了 Rust 错误处理函数 ``#[panic_handler]``，其大致功能是打印出错位置和原因并杀死当前应用。
-但核心库 core 并没有提供这项功能，得靠我们自己实现。
-
-新建一个子模块 ``lang_items.rs``，在里面编写 panic 处理函数，通过标记 ``#[panic_handler]`` 告知编译器采用我们的实现：
+课程代码里，本章内核的策略很简单：直接通过 SBI 关机（把 panic 当成失败退出）：
 
 .. code-block:: rust
 
-   // os/src/lang_items.rs
-   use core::panic::PanicInfo;
-
+   // rCore-Tutorial-in-single-workspace/ch1/src/main.rs（节选）
    #[panic_handler]
-   fn panic(_info: &PanicInfo) -> ! {
-       loop {}
+   fn panic(_: &core::panic::PanicInfo) -> ! {
+       sbi::shutdown(true)
    }
-
-目前我们遇到错误什么都不做，只在原地 ``loop`` 。
 
 移除 main 函数
 -----------------------------
 
-重新编译，又有了新错误：
+在没有 ``std`` 的情况下，Rust 仍然会尝试按“正常应用程序”的方式去寻找 ``main`` 并做一系列启动初始化（``start`` lang item）。
+但内核/裸机程序不走这套路径，因此需要：
 
-.. error::
+- 用 ``#![no_main]`` 告诉编译器“我不使用标准入口 main”；
+- 自己提供入口函数 ``_start``，并在其中完成最小启动工作（例如设栈）。
 
-   .. code-block::
-
-      $ cargo build
-         Compiling os v0.1.0 (/home/shinbokuow/workspace/v3/rCore-Tutorial-v3/os)
-      error: requires `start` lang_item
-
-编译器提醒我们缺少一个名为 ``start`` 的语义项。
-``start`` 语义项代表了标准库 std 在执行应用程序之前需要进行的一些初始化工作。由于我们禁用了标准库，编译器也就找不到这项功能的实现了。
-
-在 ``main.rs`` 的开头加入设置 ``#![no_main]`` 告诉编译器我们没有一般意义上的 ``main`` 函数，
-并将原来的 ``main`` 函数删除。这样编译器也就不需要考虑初始化工作了。
-
-.. code-block:: console
-
-   $ cargo build
-      Compiling os v0.1.0 (/home/shinbokuow/workspace/v3/rCore-Tutorial-v3/os)
-       Finished dev [unoptimized + debuginfo] target(s) in 0.06s
-
-至此，我们终于移除了所有标准库依赖，目前的代码如下：
+课程代码中，本章内核的入口 ``_start`` 是一个 *naked* 函数：编译器不会为它生成函数序言/尾声，
+因此它可以在**没有栈**的情况下执行，并由我们手动设置 ``sp``：
 
 .. code-block:: rust
 
-   // os/src/main.rs
-   #![no_std]
-   #![no_main]
-
-   mod lang_items;
-
-   // os/src/lang_items.rs
-   use core::panic::PanicInfo;
-
-   #[panic_handler]
-   fn panic(_info: &PanicInfo) -> ! {
-       loop {}
+   // rCore-Tutorial-in-single-workspace/ch1/src/main.rs（节选）
+   #[unsafe(naked)]
+   #[no_mangle]
+   #[link_section = ".text.entry"]
+   unsafe extern "C" fn _start() -> ! {
+       const STACK_SIZE: usize = 4096;
+       #[link_section = ".bss.uninit"]
+       static mut STACK: [u8; STACK_SIZE] = [0u8; STACK_SIZE];
+       core::arch::naked_asm!(
+           "la sp, {stack} + {stack_size}",
+           "j  {main}",
+           stack_size = const STACK_SIZE,
+           stack      =   sym STACK,
+           main       =   sym rust_main,
+       )
    }
 
+把这段代码拆开解释：
 
-分析被移除标准库的程序
------------------------------
+- **``#[no_mangle]``**：告诉编译器不要改函数名；否则链接器/固件可能找不到 ``_start``；
+- **``#[link_section = ".text.entry"]``**：把 ``_start`` 放进一个叫 ``.text.entry`` 的段里，方便链接脚本把它放到最前面；
+- **``static mut STACK``**：在静态区预留一块内存当栈（本章先不讨论栈溢出等问题）；
+- **``la sp, ...``**：把栈指针 ``sp`` 指到这块栈的“栈顶”（高地址）；
+- **``j {main}``**：跳到 Rust 写的 ``rust_main`` 执行真正逻辑。
 
-我们可以通过一些工具来分析目前的程序：
+小结：我们“补齐了什么”
+----------------------------------
 
-.. code-block:: console
+本节我们并没有让你从零写出 ``os``，而是明确了课程代码里为了解决 “no_std 之后缺了什么” 做了哪些补齐：
 
-   [文件格式]
-   $ file target/riscv64gc-unknown-none-elf/debug/os
-   target/riscv64gc-unknown-none-elf/debug/os: ELF 64-bit LSB executable, UCB RISC-V, ......
+- **入口**：提供 ``_start``，并在其中设栈；
+- **panic**：提供 ``#[panic_handler]``；
+- **输出与退出**：不依赖 ``std``，改为使用更底层的机制（例如 SBI）。
 
-   [文件头信息]
-   $ rust-readobj -h target/riscv64gc-unknown-none-elf/debug/os
-      File: target/riscv64gc-unknown-none-elf/debug/os
-      Format: elf64-littleriscv
-      Arch: riscv64
-      AddressSize: 64bit
-      ......
-      Type: Executable (0x2)
-      Machine: EM_RISCV (0xF3)
-      Version: 1
-      Entry: 0x0
-      ......
-      }
-
-   [反汇编导出汇编程序]
-   $ rust-objdump -S target/riscv64gc-unknown-none-elf/debug/os
-      target/riscv64gc-unknown-none-elf/debug/os:	file format elf64-littleriscv
-
-
-通过 ``file`` 工具对二进制程序 ``os`` 的分析可以看到，它好像是一个合法的 RV64 执行程序，
-但 ``rust-readobj`` 工具告诉我们它的入口地址 Entry 是 ``0``。
-再通过 ``rust-objdump`` 工具把它反汇编，没有生成任何汇编代码。
-可见，这个二进制程序虽然合法，但它是一个空程序，原因是缺少了编译器规定的入口函数 ``_start`` 。
-
-从下一节开始，我们将着手实现本节移除的、由用户态执行环境提供的功能。
-
-.. note:: 
-
-   本节内容部分参考自 `BlogOS 的相关章节 <https://os.phil-opp.com/freestanding-rust-binary/>`_ 。
-
+现在我们已经知道：没有 ``std`` 以后，程序需要自己提供入口、输出与退出能力。
+接下来我们马上换到“用户态运行”的视角，看看课程代码如何组织 ``_start/exit/write`` 这条链路，
+再把同样的思路迁移到裸机内核里。

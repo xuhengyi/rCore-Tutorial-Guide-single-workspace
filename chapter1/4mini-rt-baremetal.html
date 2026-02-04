@@ -266,17 +266,55 @@
 本节中，我们将把 <code class="docutils literal notranslate"><span class="pre">Hello</span> <span class="pre">world!</span></code> 应用程序从用户态搬到内核态。</p>
 <div class="section" id="id2">
 <h2>裸机启动过程<a class="headerlink" href="#id2" title="永久链接至标题">¶</a></h2>
-<p>用 QEMU 软件 <code class="docutils literal notranslate"><span class="pre">qemu-system-riscv64</span></code> 来模拟 RISC-V 64 计算机。加载内核程序的命令如下：</p>
+<p>用 QEMU 的系统态模拟器 <code class="docutils literal notranslate"><span class="pre">qemu-system-riscv64</span></code> 来模拟一台 RISC-V 64 计算机。</p>
+<p>在课程代码中，推荐直接用：</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span><span class="nb">cd</span> rCore-Tutorial-in-single-workspace
+<span class="gp">$ </span>cargo qemu --ch <span class="m">1</span>
+</pre></div>
+</div>
+<p>这条命令会先编译 <code class="docutils literal notranslate"><span class="pre">ch1</span></code>，再启动 <code class="docutils literal notranslate"><span class="pre">qemu-system-riscv64</span></code>。为了不让你一开始就被一长串参数吓到，
+我们先给出**运行结果**（能看到 <code class="docutils literal notranslate"><span class="pre">Hello,</span> <span class="pre">world!</span></code>），再回过头解释它背后发生了什么。</p>
+<div class="section" id="cargo-qemu-qemu">
+<h3>从 <code class="docutils literal notranslate"><span class="pre">cargo</span> <span class="pre">qemu</span></code> 到 QEMU 命令<a class="headerlink" href="#cargo-qemu-qemu" title="永久链接至标题">¶</a></h3>
+<p>课程代码在 <code class="docutils literal notranslate"><span class="pre">.cargo/config.toml</span></code> 中把 <code class="docutils literal notranslate"><span class="pre">cargo</span> <span class="pre">qemu</span></code> 配置成一个别名：</p>
+<div class="highlight-toml notranslate"><div class="highlight"><pre><span></span><span class="c1"># rCore-Tutorial-in-single-workspace/.cargo/config.toml（节选）</span>
+<span class="k">[alias]</span>
+<span class="n">qemu</span> <span class="o">=</span> <span class="s">"xtask qemu"</span>
+</pre></div>
+</div>
+<p>也就是说，<code class="docutils literal notranslate"><span class="pre">cargo</span> <span class="pre">qemu</span> <span class="pre">--ch</span> <span class="pre">1</span></code> 实际会运行 <code class="docutils literal notranslate"><span class="pre">xtask</span></code> 包里的 <code class="docutils literal notranslate"><span class="pre">qemu</span></code> 子命令。
+在 <code class="docutils literal notranslate"><span class="pre">xtask/src/main.rs</span></code> 中可以看到它如何拼出 QEMU 启动参数（节选）：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/xtask/src/main.rs（节选）</span>
+<span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">qemu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Qemu</span>::<span class="n">system</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">build</span><span class="p">.</span><span class="n">arch</span><span class="p">.</span><span class="n">qemu_system</span><span class="p">());</span><span class="w"></span>
+<span class="n">qemu</span><span class="p">.</span><span class="n">args</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="s">"-machine"</span><span class="p">,</span><span class="w"> </span><span class="s">"virt"</span><span class="p">])</span><span class="w"></span>
+<span class="w">    </span><span class="p">.</span><span class="n">arg</span><span class="p">(</span><span class="s">"-nographic"</span><span class="p">);</span><span class="w"></span>
+
+<span class="k">if</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">build</span><span class="p">.</span><span class="n">nobios</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">qemu</span><span class="p">.</span><span class="n">args</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="s">"-bios"</span><span class="p">,</span><span class="w"> </span><span class="s">"none"</span><span class="p">]);</span><span class="w"></span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="n">qemu</span><span class="p">.</span><span class="n">arg</span><span class="p">(</span><span class="s">"-bios"</span><span class="p">).</span><span class="n">arg</span><span class="p">(</span><span class="n">PROJECT</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="s">"rustsbi-qemu.bin"</span><span class="p">));</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+
+<span class="n">qemu</span><span class="p">.</span><span class="n">arg</span><span class="p">(</span><span class="s">"-kernel"</span><span class="p">)</span><span class="w"></span>
+<span class="w">    </span><span class="p">.</span><span class="n">arg</span><span class="p">(</span><span class="n">objcopy</span><span class="p">(</span><span class="n">elf</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">))</span><span class="w"></span>
+<span class="w">    </span><span class="p">.</span><span class="n">args</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="s">"-smp"</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="bp">self</span><span class="p">.</span><span class="n">smp</span><span class="p">.</span><span class="n">unwrap_or</span><span class="p">(</span><span class="mi">1</span><span class="p">).</span><span class="n">to_string</span><span class="p">()])</span><span class="w"></span>
+<span class="w">    </span><span class="p">.</span><span class="n">args</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="s">"-m"</span><span class="p">,</span><span class="w"> </span><span class="s">"64M"</span><span class="p">])</span><span class="w"></span>
+<span class="w">    </span><span class="p">.</span><span class="n">args</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="s">"-serial"</span><span class="p">,</span><span class="w"> </span><span class="s">"mon:stdio"</span><span class="p">]);</span><span class="w"></span>
+</pre></div>
+</div>
+<p>因此，对本章默认的 SBI 模式来说，它等价于运行一条形如下面的 QEMU 命令（这里把路径简化成变量）：</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>qemu-system-riscv64 <span class="se">\</span>
             -machine virt <span class="se">\</span>
             -nographic <span class="se">\</span>
-            -bios <span class="k">$(</span>BOOTLOADER<span class="k">)</span> <span class="se">\</span>
-            -device loader,file<span class="o">=</span><span class="k">$(</span>KERNEL_BIN<span class="k">)</span>,addr<span class="o">=</span><span class="k">$(</span>KERNEL_ENTRY_PA<span class="k">)</span>
+            -bios <span class="k">$(</span>RUSTSBI_BIN<span class="k">)</span> <span class="se">\</span>
+            -kernel <span class="k">$(</span>KERNEL_BIN<span class="k">)</span> <span class="se">\</span>
+            -smp <span class="m">1</span> -m 64M <span class="se">\</span>
+            -serial mon:stdio
 </pre></div>
 </div>
 <ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">-bios</span> <span class="pre">$(BOOTLOADER)</span></code> 意味着硬件加载了一个 BootLoader 程序，即 RustSBI</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">-device</span> <span class="pre">loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA)</span></code> 表示硬件内存中的特定位置 <code class="docutils literal notranslate"><span class="pre">$(KERNEL_ENTRY_PA)</span></code> 放置了操作系统的二进制代码 <code class="docutils literal notranslate"><span class="pre">$(KERNEL_BIN)</span></code> 。 <code class="docutils literal notranslate"><span class="pre">$(KERNEL_ENTRY_PA)</span></code> 的值是 <code class="docutils literal notranslate"><span class="pre">0x80200000</span></code> 。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">-bios</span> <span class="pre">$(RUSTSBI_BIN)</span></code>：加载 RustSBI（M 态固件）</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">-kernel</span> <span class="pre">$(KERNEL_BIN)</span></code>：加载内核二进制；在 <code class="docutils literal notranslate"><span class="pre">virt</span></code> 机器上默认会放到 <code class="docutils literal notranslate"><span class="pre">0x8020_0000</span></code> 附近（与本章链接脚本一致）</p></li>
 </ul>
 <p>当我们执行包含上述启动参数的 qemu-system-riscv64 软件，就意味给这台虚拟的 RISC-V64 计算机加电了。
 此时，CPU 的其它通用寄存器清零，而 PC 会指向 <code class="docutils literal notranslate"><span class="pre">0x1000</span></code> 的位置，这里有固化在硬件中的一小段引导代码，
@@ -294,240 +332,141 @@ RustSBI完成硬件初始化后，会跳转到 <code class="docutils literal not
 比如关机，显示字符串等。</p>
 </div>
 </div>
+</div>
+<div class="section" id="hello-world">
+<h2>实现裸机版 Hello, world!<a class="headerlink" href="#hello-world" title="永久链接至标题">¶</a></h2>
 <div class="section" id="id3">
-<h2>实现关机功能<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h2>
-<p>对上一节实现的代码稍作调整，通过 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> 调用 RustSBI 实现关机功能：</p>
-<div class="highlight-rust notranslate" id="term-llvm-sbicall"><div class="highlight"><pre><span></span><span class="c1">// bootloader/rustsbi-qemu.bin 直接添加的SBI规范实现的二进制代码，给操作系统提供基本支持服务</span>
-
-<span class="c1">// os/src/sbi.rs</span>
-<span class="k">fn</span> <span class="nf">sbi_call</span><span class="p">(</span><span class="n">which</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">arg0</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">arg1</span>: <span class="kt">usize</span><span class="p">,</span><span class="w"> </span><span class="n">arg2</span>: <span class="kt">usize</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">usize</span> <span class="p">{</span><span class="w"></span>
-<span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">ret</span><span class="p">;</span><span class="w"></span>
-<span class="w">  </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">      </span><span class="n">core</span>::<span class="n">arch</span>::<span class="fm">asm!</span><span class="p">(</span><span class="w"></span>
-<span class="w">          </span><span class="s">"ecall"</span><span class="p">,</span><span class="w"></span>
-<span class="o">..</span><span class="p">.</span><span class="w"></span>
-
-<span class="k">const</span><span class="w"> </span><span class="n">SBI_SHUTDOWN</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="p">;</span><span class="w"></span>
-
-<span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">shutdown</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">sbi_call</span><span class="p">(</span><span class="n">SBI_SHUTDOWN</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="fm">panic!</span><span class="p">(</span><span class="s">"It should shutdown!"</span><span class="p">);</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-
-<span class="c1">// os/src/main.rs</span>
-<span class="cp">#[no_mangle]</span><span class="w"></span>
-<span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span> <span class="nf">_start</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">shutdown</span><span class="p">();</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<h3>先跑起来：你会看到什么输出<a class="headerlink" href="#id3" title="永久链接至标题">¶</a></h3>
+<p>执行 <code class="docutils literal notranslate"><span class="pre">cargo</span> <span class="pre">qemu</span> <span class="pre">--ch</span> <span class="pre">1</span></code> 后，你会看到两部分输出：</p>
+<ul class="simple">
+<li><p>RustSBI 的启动信息（版本/平台/内存布局/内核入口地址等）</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Hello,</span> <span class="pre">world!``（来自</span> <span class="pre">``ch1</span></code> 内核）</p></li>
+</ul>
+<p>可以先抓住两条关键信息：</p>
+<ul class="simple">
+<li><p>RustSBI 打印的 <code class="docutils literal notranslate"><span class="pre">Supervisor</span> <span class="pre">Address</span> <span class="pre">:</span> <span class="pre">0x80200000</span></code>：这就是它将要跳转执行内核入口的位置；</p></li>
+<li><p>我们的链接脚本也把 <code class="docutils literal notranslate"><span class="pre">.text</span></code> 放到了 <code class="docutils literal notranslate"><span class="pre">0x8020_0000</span></code>：二者必须一致，否则就会“跳错地方”。</p></li>
+</ul>
+</div>
+<div class="section" id="ch1">
+<h3>ch1 的关键文件<a class="headerlink" href="#ch1" title="永久链接至标题">¶</a></h3>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">rCore-Tutorial-in-single-workspace/ch1/src/main.rs</span></code>：S 态入口 <code class="docutils literal notranslate"><span class="pre">_start</span></code>、设栈、<code class="docutils literal notranslate"><span class="pre">rust_main</span></code>；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">rCore-Tutorial-in-single-workspace/ch1/src/sbi.rs</span></code>：SBI 调用封装（通过 <code class="docutils literal notranslate"><span class="pre">ecall</span></code>）；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">rCore-Tutorial-in-single-workspace/ch1/build.rs</span></code>：<strong>生成链接脚本</strong> 并传给链接器；</p></li>
+<li><p>（可选）``–nobios``：会额外引入 <code class="docutils literal notranslate"><span class="pre">m_entry_rv64.asm</span></code> / <code class="docutils literal notranslate"><span class="pre">msbi.rs</span></code> 来完成 M→S 切换与最小 SBI。</p></li>
+</ul>
+</div>
+<div class="section" id="sbi">
+<h3>SBI 调用：输出与关机<a class="headerlink" href="#sbi" title="永久链接至标题">¶</a></h3>
+<p>在用户态时，我们用 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> 调 Linux 系统调用；到了裸机 S 态，我们仍然用 <code class="docutils literal notranslate"><span class="pre">ecall</span></code>，
+但这次它会进入 RustSBI（M 态）并触发 <strong>SBI 调用</strong>。</p>
+<p>课程代码在 <code class="docutils literal notranslate"><span class="pre">ch1/src/sbi.rs</span></code> 中实现了两个最小能力：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">console_putchar</span></code>：输出一个字符；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">shutdown</span></code>：关机（优先尝试 SRST 扩展，失败则回退到 legacy shutdown）。</p></li>
+</ul>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/ch1/src/sbi.rs（节选）</span>
+<span class="fm">asm!</span><span class="p">(</span><span class="w"></span>
+<span class="w">    </span><span class="s">"ecall"</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">inlateout</span><span class="p">(</span><span class="s">"a0"</span><span class="p">)</span><span class="w"> </span><span class="n">arg0</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">error</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="n">inlateout</span><span class="p">(</span><span class="s">"a1"</span><span class="p">)</span><span class="w"> </span><span class="n">arg1</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">value</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="k">in</span><span class="p">(</span><span class="s">"a2"</span><span class="p">)</span><span class="w"> </span><span class="n">arg2</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="k">in</span><span class="p">(</span><span class="s">"a6"</span><span class="p">)</span><span class="w"> </span><span class="n">fid</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="k">in</span><span class="p">(</span><span class="s">"a7"</span><span class="p">)</span><span class="w"> </span><span class="n">eid</span><span class="p">,</span><span class="w"></span>
+<span class="p">);</span><span class="w"></span>
 </pre></div>
 </div>
-<p>应用程序访问操作系统提供的系统调用的指令是 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> ，操作系统访问
-RustSBI提供的SBI调用的指令也是 <code class="docutils literal notranslate"><span class="pre">ecall</span></code> ，
-虽然指令一样，但它们所在的特权级是不一样的。
-简单地说，应用程序位于最弱的用户特权级（User Mode），
-操作系统位于内核特权级（Supervisor Mode），
-RustSBI位于机器特权级（Machine Mode）。
-下一章会进一步阐释具体细节。</p>
-<p>编译执行，结果如下：</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># 编译生成ELF格式的执行文件</span>
-$ cargo build --release
- Compiling os v0.1.0 <span class="o">(</span>/media/chyyuu/ca8c7ba6-51b7-41fc-8430-e29e31e5328f/thecode/rust/os_kernel_lab/os<span class="o">)</span>
-  Finished release <span class="o">[</span>optimized<span class="o">]</span> target<span class="o">(</span>s<span class="o">)</span> <span class="k">in</span> <span class="m">0</span>.15s
-<span class="c1"># 把ELF执行文件转成bianary文件</span>
-$ rust-objcopy --binary-architecture<span class="o">=</span>riscv64 target/riscv64gc-unknown-none-elf/release/os --strip-all -O binary target/riscv64gc-unknown-none-elf/release/os.bin
-
-<span class="c1"># 加载运行</span>
-$ qemu-system-riscv64 -machine virt -nographic -bios ../bootloader/rustsbi-qemu.bin -device loader,file<span class="o">=</span>target/riscv64gc-unknown-none-elf/release/os.bin,addr<span class="o">=</span>0x80200000
-<span class="c1"># 无法退出，风扇狂转，感觉碰到死循环</span>
-</pre></div>
+<p>它做的事可以概括成一句话：<strong>把参数放进寄存器，然后执行 ``ecall`` 请求 M 态服务</strong>。</p>
 </div>
-<p>问题在哪？通过 rust-readobj 分析 <code class="docutils literal notranslate"><span class="pre">os</span></code> 可执行程序，发现其入口地址不是
-RustSBI 约定的 <code class="docutils literal notranslate"><span class="pre">0x80200000</span></code> 。我们需要修改程序的内存布局并设置好栈空间。</p>
-</div>
-<div class="section" id="id4">
-<h2>设置正确的程序内存布局<a class="headerlink" href="#id4" title="永久链接至标题">¶</a></h2>
-<p>可以通过 <strong>链接脚本</strong> (Linker Script) 调整链接器的行为，使得最终生成的可执行文件的内存布局符合我们的预期。</p>
-<p>修改 Cargo 的配置文件来使用我们自己的链接脚本 <code class="docutils literal notranslate"><span class="pre">os/src/linker.ld</span></code>：</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="linenos">1</span><span class="o">//</span> <span class="n">os</span><span class="o">/.</span><span class="n">cargo</span><span class="o">/</span><span class="n">config</span>
-<span class="linenos">2</span><span class="p">[</span><span class="n">build</span><span class="p">]</span>
-<span class="linenos">3</span><span class="n">target</span> <span class="o">=</span> <span class="s2">"riscv64gc-unknown-none-elf"</span>
-<span class="linenos">4</span>
-<span class="hll"><span class="linenos">5</span><span class="p">[</span><span class="n">target</span><span class="o">.</span><span class="n">riscv64gc</span><span class="o">-</span><span class="n">unknown</span><span class="o">-</span><span class="n">none</span><span class="o">-</span><span class="n">elf</span><span class="p">]</span>
-</span><span class="hll"><span class="linenos">6</span><span class="n">rustflags</span> <span class="o">=</span> <span class="p">[</span>
-</span><span class="hll"><span class="linenos">7</span>    <span class="s2">"-Clink-arg=-Tsrc/linker.ld"</span><span class="p">,</span> <span class="s2">"-Cforce-frame-pointers=yes"</span>
-</span><span class="hll"><span class="linenos">8</span><span class="p">]</span>
-</span></pre></div>
-</div>
-<p>具体的链接脚本 <code class="docutils literal notranslate"><span class="pre">os/src/linker.ld</span></code> 如下：</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="n">OUTPUT_ARCH</span><span class="p">(</span><span class="n">riscv</span><span class="p">)</span>
-<span class="linenos"> 2</span><span class="n">ENTRY</span><span class="p">(</span><span class="n">_start</span><span class="p">)</span>
-<span class="linenos"> 3</span><span class="n">BASE_ADDRESS</span> <span class="o">=</span> <span class="mh">0x80200000</span><span class="p">;</span>
-<span class="linenos"> 4</span>
-<span class="linenos"> 5</span><span class="n">SECTIONS</span>
-<span class="linenos"> 6</span><span class="p">{</span>
-<span class="linenos"> 7</span>    <span class="o">.</span> <span class="o">=</span> <span class="n">BASE_ADDRESS</span><span class="p">;</span>
-<span class="linenos"> 8</span>    <span class="n">skernel</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos"> 9</span>
-<span class="linenos">10</span>    <span class="n">stext</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">11</span>    <span class="o">.</span><span class="n">text</span> <span class="p">:</span> <span class="p">{</span>
-<span class="linenos">12</span>        <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">text</span><span class="o">.</span><span class="n">entry</span><span class="p">)</span>
-<span class="linenos">13</span>        <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">text</span> <span class="o">.</span><span class="n">text</span><span class="o">.*</span><span class="p">)</span>
-<span class="linenos">14</span>    <span class="p">}</span>
-<span class="linenos">15</span>
-<span class="linenos">16</span>    <span class="o">.</span> <span class="o">=</span> <span class="n">ALIGN</span><span class="p">(</span><span class="mi">4</span><span class="n">K</span><span class="p">);</span>
-<span class="linenos">17</span>    <span class="n">etext</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">18</span>    <span class="n">srodata</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">19</span>    <span class="o">.</span><span class="n">rodata</span> <span class="p">:</span> <span class="p">{</span>
-<span class="linenos">20</span>        <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">rodata</span> <span class="o">.</span><span class="n">rodata</span><span class="o">.*</span><span class="p">)</span>
-<span class="linenos">21</span>    <span class="p">}</span>
-<span class="linenos">22</span>
-<span class="linenos">23</span>    <span class="o">.</span> <span class="o">=</span> <span class="n">ALIGN</span><span class="p">(</span><span class="mi">4</span><span class="n">K</span><span class="p">);</span>
-<span class="linenos">24</span>    <span class="n">erodata</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">25</span>    <span class="n">sdata</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">26</span>    <span class="o">.</span><span class="n">data</span> <span class="p">:</span> <span class="p">{</span>
-<span class="linenos">27</span>        <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">data</span> <span class="o">.</span><span class="n">data</span><span class="o">.*</span><span class="p">)</span>
-<span class="linenos">28</span>    <span class="p">}</span>
-<span class="linenos">29</span>
-<span class="linenos">30</span>    <span class="o">.</span> <span class="o">=</span> <span class="n">ALIGN</span><span class="p">(</span><span class="mi">4</span><span class="n">K</span><span class="p">);</span>
-<span class="linenos">31</span>    <span class="n">edata</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">32</span>    <span class="o">.</span><span class="n">bss</span> <span class="p">:</span> <span class="p">{</span>
-<span class="linenos">33</span>        <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">bss</span><span class="o">.</span><span class="n">stack</span><span class="p">)</span>
-<span class="linenos">34</span>        <span class="n">sbss</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">35</span>        <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">bss</span> <span class="o">.</span><span class="n">bss</span><span class="o">.*</span><span class="p">)</span>
-<span class="linenos">36</span>    <span class="p">}</span>
-<span class="linenos">37</span>
-<span class="linenos">38</span>    <span class="o">.</span> <span class="o">=</span> <span class="n">ALIGN</span><span class="p">(</span><span class="mi">4</span><span class="n">K</span><span class="p">);</span>
-<span class="linenos">39</span>    <span class="n">ebss</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">40</span>    <span class="n">ekernel</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
-<span class="linenos">41</span>
-<span class="linenos">42</span>    <span class="o">/</span><span class="n">DISCARD</span><span class="o">/</span> <span class="p">:</span> <span class="p">{</span>
-<span class="linenos">43</span>        <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">eh_frame</span><span class="p">)</span>
-<span class="linenos">44</span>    <span class="p">}</span>
-<span class="linenos">45</span><span class="p">}</span>
-</pre></div>
-</div>
-<p>第 1 行我们设置了目标平台为 riscv ；第 2 行我们设置了整个程序的入口点为之前定义的全局符号 <code class="docutils literal notranslate"><span class="pre">_start</span></code>；
-第 3 行定义了一个常量 <code class="docutils literal notranslate"><span class="pre">BASE_ADDRESS</span></code> 为 <code class="docutils literal notranslate"><span class="pre">0x80200000</span></code> ，RustSBI 期望的 OS 起始地址；</p>
-<div class="admonition attention">
-<p class="admonition-title">注意</p>
-<p>linker 脚本的语法不做要求，感兴趣的同学可以自行查阅相关资料。</p>
-</div>
-<p>从 <code class="docutils literal notranslate"><span class="pre">BASE_ADDRESS</span></code> 开始，代码段 <code class="docutils literal notranslate"><span class="pre">.text</span></code>, 只读数据段 <code class="docutils literal notranslate"><span class="pre">.rodata</span></code>，数据段 <code class="docutils literal notranslate"><span class="pre">.data</span></code>, bss 段 <code class="docutils literal notranslate"><span class="pre">.bss</span></code> 由低到高依次放置，
-且每个段都有两个全局变量给出其起始和结束地址（比如 <code class="docutils literal notranslate"><span class="pre">.text</span></code> 段的开始和结束地址分别是 <code class="docutils literal notranslate"><span class="pre">stext</span></code> 和 <code class="docutils literal notranslate"><span class="pre">etext</span></code> ）。</p>
-</div>
-<div class="section" id="id5">
-<h2>正确配置栈空间布局<a class="headerlink" href="#id5" title="永久链接至标题">¶</a></h2>
-<p>用另一段汇编代码初始化栈空间：</p>
-<div class="highlight-asm notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1"># os/src/entry.asm</span>
-<span class="linenos"> 2</span>    <span class="na">.section</span> <span class="no">.text.entry</span>
-<span class="linenos"> 3</span>    <span class="na">.globl</span> <span class="no">_start</span>
-<span class="linenos"> 4</span><span class="nl">_start:</span>
-<span class="linenos"> 5</span>    <span class="nf">la</span> <span class="no">sp</span><span class="p">,</span> <span class="no">boot_stack_top</span>
-<span class="linenos"> 6</span>    <span class="nf">call</span> <span class="no">rust_main</span>
-<span class="linenos"> 7</span>
-<span class="linenos"> 8</span>    <span class="na">.section</span> <span class="no">.bss.stack</span>
-<span class="linenos"> 9</span>    <span class="na">.globl</span> <span class="no">boot_stack</span>
-<span class="linenos">10</span><span class="nl">boot_stack:</span>
-<span class="linenos">11</span>    <span class="na">.space</span> <span class="mi">4096</span> <span class="p">*</span> <span class="mi">16</span>
-<span class="linenos">12</span>    <span class="na">.globl</span> <span class="no">boot_stack_top</span>
-<span class="linenos">13</span><span class="nl">boot_stack_top:</span>
-</pre></div>
-</div>
-<p>在第 8 行，我们预留了一块大小为 4096 * 16 字节，也就是 <span class="math notranslate nohighlight">\(64\text{KiB}\)</span> 的空间，
-用作操作系统的栈空间。
-栈顶地址被全局符号 <code class="docutils literal notranslate"><span class="pre">boot_stack_top</span></code> 标识，栈底则被全局符号 <code class="docutils literal notranslate"><span class="pre">boot_stack</span></code> 标识。
-同时，这块栈空间被命名为
-<code class="docutils literal notranslate"><span class="pre">.bss.stack</span></code> ，链接脚本里有它的位置。</p>
-<p><code class="docutils literal notranslate"><span class="pre">_start</span></code> 作为操作系统的入口地址，将依据链接脚本被放在 <code class="docutils literal notranslate"><span class="pre">BASE_ADDRESS</span></code> 处。
-<code class="docutils literal notranslate"><span class="pre">la</span> <span class="pre">sp,</span> <span class="pre">boot_stack_top</span></code> 作为 OS 的第一条指令，
-将 sp 设置为栈空间的栈顶。
-简单起见，我们目前不考虑 sp 越过栈底 <code class="docutils literal notranslate"><span class="pre">boot_stack</span></code> ，也就是栈溢出的情形。
-第二条指令则是函数调用 <code class="docutils literal notranslate"><span class="pre">rust_main</span></code> ，这里的 <code class="docutils literal notranslate"><span class="pre">rust_main</span></code> 是我们稍后自己编写的应用入口。</p>
-<p>接着，我们在 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 中嵌入这些汇编代码并声明应用入口 <code class="docutils literal notranslate"><span class="pre">rust_main</span></code> ：</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// os/src/main.rs</span>
-<span class="linenos"> 2</span><span class="cp">#![no_std]</span><span class="w"></span>
-<span class="linenos"> 3</span><span class="cp">#![no_main]</span><span class="w"></span>
-<span class="linenos"> 4</span>
-<span class="linenos"> 5</span><span class="k">mod</span> <span class="nn">lang_items</span><span class="p">;</span><span class="w"></span>
-<span class="linenos"> 6</span>
-<span class="hll"><span class="linenos"> 7</span><span class="n">core</span>::<span class="n">arch</span>::<span class="fm">global_asm!</span><span class="p">(</span><span class="fm">include_str!</span><span class="p">(</span><span class="s">"entry.asm"</span><span class="p">));</span><span class="w"></span>
-</span><span class="linenos"> 8</span>
-<span class="hll"><span class="linenos"> 9</span><span class="cp">#[no_mangle]</span><span class="w"></span>
-</span><span class="hll"><span class="linenos">10</span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-</span><span class="hll"><span class="linenos">11</span><span class="w">    </span><span class="n">shutdown</span><span class="p">();</span><span class="w"></span>
-</span><span class="hll"><span class="linenos">12</span><span class="p">}</span><span class="w"></span>
-</span></pre></div>
-</div>
-<p>背景高亮指出了 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 中新增的代码。</p>
-<p>第 7 行，我们使用 <code class="docutils literal notranslate"><span class="pre">global_asm</span></code> 宏，将同目录下的汇编文件 <code class="docutils literal notranslate"><span class="pre">entry.asm</span></code> 嵌入到代码中。</p>
-<p>从第 9 行开始，
-我们声明了应用的入口点 <code class="docutils literal notranslate"><span class="pre">rust_main</span></code> ，需要注意的是，这里通过宏将 <code class="docutils literal notranslate"><span class="pre">rust_main</span></code>
-标记为 <code class="docutils literal notranslate"><span class="pre">#[no_mangle]</span></code> 以避免编译器对它的名字进行混淆，不然在链接时，
-<code class="docutils literal notranslate"><span class="pre">entry.asm</span></code> 将找不到 <code class="docutils literal notranslate"><span class="pre">main.rs</span></code> 提供的外部符号 <code class="docutils literal notranslate"><span class="pre">rust_main</span></code>，导致链接失败。</p>
-<p>再次使用上节中的编译，生成和运行操作，我们看到QEMU模拟的RISC-V 64计算机 <strong>优雅</strong> 地退出了！</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp"># </span>教程使用的 RustSBI 版本比代码框架稍旧，输出有所不同
-<span class="gp">$ </span>qemu-system-riscv64 <span class="se">\</span>
-<span class="gp">&gt; </span>-machine virt <span class="se">\</span>
-<span class="gp">&gt; </span>-nographic <span class="se">\</span>
-<span class="gp">&gt; </span>-bios ../bootloader/rustsbi-qemu.bin <span class="se">\</span>
-<span class="gp">&gt; </span>-device loader,file<span class="o">=</span>target/riscv64gc-unknown-none-elf/release/os.bin,addr<span class="o">=</span>0x80200000
-<span class="go">[rustsbi] Version 0.1.0</span>
-<span class="go">.______       __    __      _______.___________.  _______..______   __</span>
-<span class="go">|   _  \     |  |  |  |    /       |           | /       ||   _  \ |  |</span>
-<span class="go">|  |_)  |    |  |  |  |   |   (----`---|  |----`|   (----`|  |_)  ||  |</span>
-<span class="go">|      /     |  |  |  |    \   \       |  |      \   \    |   _  &lt; |  |</span>
-<span class="go">|  |\  \----.|  `--'  |.----)   |      |  |  .----)   |   |  |_)  ||  |</span>
-<span class="go">| _| `._____| \______/ |_______/       |__|  |_______/    |______/ |__|</span>
-
-<span class="go">[rustsbi] Platform: QEMU</span>
-<span class="go">[rustsbi] misa: RV64ACDFIMSU</span>
-<span class="go">[rustsbi] mideleg: 0x222</span>
-<span class="go">[rustsbi] medeleg: 0xb1ab</span>
-<span class="go">[rustsbi] Kernel entry: 0x80200000</span>
-</pre></div>
-</div>
-</div>
-<div class="section" id="bss">
-<h2>清空 .bss 段<a class="headerlink" href="#bss" title="永久链接至标题">¶</a></h2>
-<p>等一等，与内存相关的部分太容易出错了， <strong>清零 .bss 段</strong> 的工作我们还没有完成。</p>
-<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="linenos"> 1</span><span class="c1">// os/src/main.rs</span>
-<span class="linenos"> 2</span><span class="k">fn</span> <span class="nf">clear_bss</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 3</span><span class="w">    </span><span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 4</span><span class="w">        </span><span class="k">fn</span> <span class="nf">sbss</span><span class="p">();</span><span class="w"></span>
-<span class="linenos"> 5</span><span class="w">        </span><span class="k">fn</span> <span class="nf">ebss</span><span class="p">();</span><span class="w"></span>
-<span class="linenos"> 6</span><span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="linenos"> 7</span><span class="w">    </span><span class="p">(</span><span class="n">sbss</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="o">..</span><span class="n">ebss</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">).</span><span class="n">for_each</span><span class="p">(</span><span class="o">|</span><span class="n">a</span><span class="o">|</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos"> 8</span><span class="w">        </span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">(</span><span class="n">a</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="o">*</span><span class="k">mut</span><span class="w"> </span><span class="kt">u8</span><span class="p">).</span><span class="n">write_volatile</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
-<span class="linenos"> 9</span><span class="w">    </span><span class="p">});</span><span class="w"></span>
-<span class="linenos">10</span><span class="p">}</span><span class="w"></span>
-<span class="linenos">11</span>
-<span class="linenos">12</span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="linenos">13</span><span class="w">    </span><span class="n">clear_bss</span><span class="p">();</span><span class="w"></span>
-<span class="linenos">14</span><span class="w">    </span><span class="n">shutdown</span><span class="p">();</span><span class="w"></span>
-<span class="linenos">15</span><span class="p">}</span><span class="w"></span>
-</pre></div>
-</div>
-<p>链接脚本 <code class="docutils literal notranslate"><span class="pre">linker.ld</span></code> 中给出的全局符号 <code class="docutils literal notranslate"><span class="pre">sbss</span></code> 和 <code class="docutils literal notranslate"><span class="pre">ebss</span></code> 让我们能轻松确定 <code class="docutils literal notranslate"><span class="pre">.bss</span></code> 段的位置。</p>
-</div>
-<div class="section" id="id6">
-<h2>添加裸机打印相关函数<a class="headerlink" href="#id6" title="永久链接至标题">¶</a></h2>
-<p>在上一节中我们为用户态程序实现的 <code class="docutils literal notranslate"><span class="pre">println</span></code> 宏，略作修改即可用于本节的内核态操作系统。
-详见 <code class="docutils literal notranslate"><span class="pre">os/src/console.rs</span></code>。</p>
-<p>利用 <code class="docutils literal notranslate"><span class="pre">println</span></code> 宏，我们重写异常处理函数 <code class="docutils literal notranslate"><span class="pre">panic</span></code>，使其在 panic 时能打印错误发生的位置。
-相关代码位于 <code class="docutils literal notranslate"><span class="pre">os/src/lang_items.rs</span></code> 中。</p>
-<p>我们还使用第三方库 <code class="docutils literal notranslate"><span class="pre">log</span></code> 为你实现了日志模块，相关代码位于 <code class="docutils literal notranslate"><span class="pre">os/src/logging.rs</span></code> 中。</p>
+<div class="section" id="sp">
+<h3>入口与栈：为什么必须先设 sp<a class="headerlink" href="#sp" title="永久链接至标题">¶</a></h3>
+<p>在裸机上，启动时**没有任何人替你准备栈**。因此第一件事就是把栈指针 <code class="docutils literal notranslate"><span class="pre">sp</span></code> 指到一段你预留的内存。</p>
 <div class="admonition note">
 <p class="admonition-title">注解</p>
-<p>在 cargo 项目中引入外部库 log，需要修改 <code class="docutils literal notranslate"><span class="pre">Cargo.toml</span></code> 加入相应的依赖信息。</p>
+<p>栈是向低地址增长的。我们把 <code class="docutils literal notranslate"><span class="pre">sp</span></code> 设为 <code class="docutils literal notranslate"><span class="pre">stack</span> <span class="pre">+</span> <span class="pre">stack_size``（栈顶，高地址），</span>
+<span class="pre">后续函数调用/入栈会让</span> <span class="pre">``sp</span></code> 逐步减小。</p>
 </div>
-<p>现在，让我们重复一遍本章开头的试验，<code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">run</span> <span class="pre">LOG=TRACE</span></code>！</p>
-<div class="figure align-center">
-<img alt="../_images/color-demo.png" src="../_images/color-demo.png"/>
+<p>课程代码选择在 <code class="docutils literal notranslate"><span class="pre">ch1/src/main.rs</span></code> 里用一个 <em>naked</em> 入口来完成这件事（省去单独的 <code class="docutils literal notranslate"><span class="pre">entry.asm</span></code> 文件）：</p>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/ch1/src/main.rs（节选）</span>
+<span class="cp">#[unsafe(naked)]</span><span class="w"></span>
+<span class="cp">#[no_mangle]</span><span class="w"></span>
+<span class="cp">#[link_section = </span><span class="s">".text.entry"</span><span class="cp">]</span><span class="w"></span>
+<span class="k">unsafe</span><span class="w"> </span><span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span> <span class="nf">_start</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">STACK_SIZE</span>: <span class="kt">usize</span> <span class="o">=</span><span class="w"> </span><span class="mi">4096</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="cp">#[link_section = </span><span class="s">".bss.uninit"</span><span class="cp">]</span><span class="w"></span>
+<span class="w">    </span><span class="k">static</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">STACK</span>: <span class="p">[</span><span class="kt">u8</span><span class="p">;</span><span class="w"> </span><span class="n">STACK_SIZE</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="mi">0</span><span class="k">u8</span><span class="p">;</span><span class="w"> </span><span class="n">STACK_SIZE</span><span class="p">];</span><span class="w"></span>
+<span class="w">    </span><span class="n">core</span>::<span class="n">arch</span>::<span class="n">naked_asm</span><span class="o">!</span><span class="p">(</span><span class="w"></span>
+<span class="w">        </span><span class="s">"la sp, {stack} + {stack_size}"</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="s">"j  {main}"</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">stack_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">STACK_SIZE</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">stack</span><span class="w">      </span><span class="o">=</span><span class="w">   </span><span class="n">sym</span><span class="w"> </span><span class="n">STACK</span><span class="p">,</span><span class="w"></span>
+<span class="w">        </span><span class="n">main</span><span class="w">       </span><span class="o">=</span><span class="w">   </span><span class="n">sym</span><span class="w"> </span><span class="n">rust_main</span><span class="p">,</span><span class="w"></span>
+<span class="w">    </span><span class="p">)</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
 </div>
+</div>
+<div class="section" id="build-rs">
+<h3>链接脚本：由 build.rs 生成并注入<a class="headerlink" href="#build-rs" title="永久链接至标题">¶</a></h3>
+<p>让内核“从正确地址开始执行”，离不开链接脚本。课程代码把链接脚本写在 <code class="docutils literal notranslate"><span class="pre">build.rs</span></code> 里并在编译时生成，
+从而保证：</p>
+<ul class="simple">
+<li><p>SBI 模式下，内核代码与入口放在 <code class="docutils literal notranslate"><span class="pre">0x8020_0000</span></code> 附近；</p></li>
+<li><p>nobios 模式下，M 态入口从 <code class="docutils literal notranslate"><span class="pre">0x8000_0000</span></code> 开始，而 S 态内核从 <code class="docutils literal notranslate"><span class="pre">0x8020_0000</span></code> 开始。</p></li>
+</ul>
+<blockquote>
+<div><p><code class="docutils literal notranslate"><span class="pre">build.rs</span></code> 中 SBI 模式的链接脚本片段：</p>
+</div></blockquote>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/ch1/build.rs（节选）</span>
+<span class="c1">// SBI mode: kernel at 0x80200000</span>
+<span class="s">r#"</span>
+<span class="s">OUTPUT_ARCH(riscv)</span>
+<span class="s">SECTIONS {</span>
+<span class="s">    .text 0x80200000 : {</span>
+<span class="s">        *(.text.entry)</span>
+<span class="s">        *(.text .text.*)</span>
+<span class="s">    }</span>
+<span class="s">    .rodata : { *(.rodata .rodata.*) *(.srodata .srodata.*) }</span>
+<span class="s">    .data   : { *(.data   .data.*)   *(.sdata   .sdata.*)   }</span>
+<span class="s">    .bss    : { *(.bss.uninit) *(.bss .bss.*) *(.sbss .sbss.*) }</span>
+<span class="s">}</span>
+<span class="s">"#</span><span class="w"></span>
+</pre></div>
+</div>
+<p>你可以先把它理解为：把 <code class="docutils literal notranslate"><span class="pre">.text</span></code> 放到 <code class="docutils literal notranslate"><span class="pre">0x8020_0000</span></code>，并确保 <code class="docutils literal notranslate"><span class="pre">.text.entry``（也就是</span> <span class="pre">``_start</span></code>）在最前面。</p>
+</div>
+<div class="section" id="id4">
+<h3>把用户态逻辑“迁移”到裸机<a class="headerlink" href="#id4" title="永久链接至标题">¶</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">rust_main</span></code> 里做的事情和上一节很像：输出字符串，然后退出。
+区别在于：</p>
+<ul class="simple">
+<li><p><strong>输出</strong>：不再是 <code class="docutils literal notranslate"><span class="pre">write</span></code> 系统调用，而是对 <code class="docutils literal notranslate"><span class="pre">console_putchar</span></code> 的循环调用；</p></li>
+<li><p><strong>退出</strong>：不再是 <code class="docutils literal notranslate"><span class="pre">exit</span></code> 系统调用，而是 <code class="docutils literal notranslate"><span class="pre">sbi::shutdown</span></code>。</p></li>
+</ul>
+<div class="highlight-rust notranslate"><div class="highlight"><pre><span></span><span class="c1">// rCore-Tutorial-in-single-workspace/ch1/src/main.rs（节选）</span>
+<span class="k">extern</span><span class="w"> </span><span class="s">"C"</span><span class="w"> </span><span class="k">fn</span> <span class="nf">rust_main</span><span class="p">()</span><span class="w"> </span>-&gt; <span class="o">!</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="s">b"Hello, world!</span><span class="se">\\</span><span class="s">n"</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="w">        </span><span class="n">sbi</span>::<span class="n">console_putchar</span><span class="p">(</span><span class="o">*</span><span class="n">c</span><span class="p">);</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="n">sbi</span>::<span class="n">shutdown</span><span class="p">(</span><span class="kc">false</span><span class="p">)</span><span class="w"></span>
+<span class="p">}</span><span class="w"></span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="nobios">
+<h3>可选：nobios 模式<a class="headerlink" href="#nobios" title="永久链接至标题">¶</a></h3>
+<p>如果使用：</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>cargo qemu --ch <span class="m">1</span> --nobios
+</pre></div>
+</div>
+<p>则 QEMU 不加载 RustSBI（<code class="docutils literal notranslate"><span class="pre">-bios</span> <span class="pre">none</span></code>），而是从 <code class="docutils literal notranslate"><span class="pre">0x8000_0000</span></code> 直接启动，
+由课程代码提供的 M 态入口与最小 SBI 实现完成 M→S 的切换与服务。</p>
 <p>至此，我们完成了第一章的实验内容，</p>
 <div class="admonition note">
 <p class="admonition-title">注解</p>
 <p>背景知识：<a class="reference external" href="https://rcore-os.github.io/rCore-Tutorial-Book-v3/chapter1/4understand-prog.html">理解应用程序和执行环境</a></p>
+</div>
 </div>
 </div>
 </div>
@@ -587,12 +526,20 @@ RustSBI 约定的 <code class="docutils literal notranslate"><span class="pre">0
           <div class="toc-tree">
             <ul>
 <li><a class="reference internal" href="#">构建裸机执行环境</a><ul>
-<li><a class="reference internal" href="#id2">裸机启动过程</a></li>
-<li><a class="reference internal" href="#id3">实现关机功能</a></li>
-<li><a class="reference internal" href="#id4">设置正确的程序内存布局</a></li>
-<li><a class="reference internal" href="#id5">正确配置栈空间布局</a></li>
-<li><a class="reference internal" href="#bss">清空 .bss 段</a></li>
-<li><a class="reference internal" href="#id6">添加裸机打印相关函数</a></li>
+<li><a class="reference internal" href="#id2">裸机启动过程</a><ul>
+<li><a class="reference internal" href="#cargo-qemu-qemu">从 <code class="docutils literal notranslate"><span class="pre">cargo</span> <span class="pre">qemu</span></code> 到 QEMU 命令</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#hello-world">实现裸机版 Hello, world!</a><ul>
+<li><a class="reference internal" href="#id3">先跑起来：你会看到什么输出</a></li>
+<li><a class="reference internal" href="#ch1">ch1 的关键文件</a></li>
+<li><a class="reference internal" href="#sbi">SBI 调用：输出与关机</a></li>
+<li><a class="reference internal" href="#sp">入口与栈：为什么必须先设 sp</a></li>
+<li><a class="reference internal" href="#build-rs">链接脚本：由 build.rs 生成并注入</a></li>
+<li><a class="reference internal" href="#id4">把用户态逻辑“迁移”到裸机</a></li>
+<li><a class="reference internal" href="#nobios">可选：nobios 模式</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -644,6 +591,5 @@ var addUtterances = () => {
 commentsRunWhenDOMLoaded(addUtterances);
 </script>
     <script src="../_static/translations.js"></script>
-    <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     </body>
 </html>
